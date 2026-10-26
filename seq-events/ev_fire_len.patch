@@ -1,0 +1,362 @@
+diff --git a/elekloader/sdk/include/digitakt-mk1/seq.h b/elekloader/sdk/include/digitakt-mk1/seq.h
+index bc09bc3..8a14f70 100644
+--- a/elekloader/sdk/include/digitakt-mk1/seq.h
++++ b/elekloader/sdk/include/digitakt-mk1/seq.h
+@@ -14,6 +14,7 @@
+ #define SQ_STEPS  64
+ #define SQ_NOTES  4                     /* a MIDI track's notes: the note and up to 3 intervals */
+ #define SQ_SLOTS  53                    /* a step's parameter locks, 0 to SQ_SLOTS - 1 */
++#define SQ_LEN_MAX 127                  /* seq-events 0.2: ev_fire_len, LEN as its index (TRIG page) */
+ 
+ #include "seq-events.h"
+ 
+diff --git a/elekloader/sdk/include/digitone-mk1/seq.h b/elekloader/sdk/include/digitone-mk1/seq.h
+index 9e9fb2f..2962324 100644
+--- a/elekloader/sdk/include/digitone-mk1/seq.h
++++ b/elekloader/sdk/include/digitone-mk1/seq.h
+@@ -13,6 +13,7 @@
+ #define SQ_STEPS  64
+ #define SQ_NOTES  8                     /* a step's notes: the note and up to 7 intervals (a chord) */
+ #define SQ_SLOTS  79                    /* a sound's parameter slots, 0 to SQ_SLOTS - 1 */
++#define SQ_LEN_MAX 127                  /* seq-events 0.2: ev_fire_len, LEN as its index (TRIG page) */
+ 
+ #include "seq-events.h"
+ 
+diff --git a/elekloader/sdk/include/seq-events.h b/elekloader/sdk/include/seq-events.h
+index 10ad8af..8a5bd04 100644
+--- a/elekloader/sdk/include/seq-events.h
++++ b/elekloader/sdk/include/seq-events.h
+@@ -54,6 +54,11 @@ typedef void (*ev_fire_notes_fn)(int32_t track, int32_t step, int8_t notes[SQ_NO
+ /* ev_fire_vel: the velocity, 0-127 (clamped after each handler) */
+ typedef void (*ev_fire_vel_fn)(int32_t track, int32_t step, int32_t *vel);
+ 
++/* ev_fire_len: the note's length, as the device stores LEN: the step's own LEN, else the track's
++ * (*len, clamped after each handler). A device that offers it defines SQ_LEN_MAX, the largest LEN
++ * value; the Digitone mk1 (seq-events 0.2) does: 0-127, the TRIG page's LEN as an index. */
++typedef void (*ev_fire_len_fn)(int32_t track, int32_t step, int32_t *len);
++
+ /* ev_fire_locks: parameter locks added to the step (audio tracks). out: room free entries.
+  * -> the entries written. A slot outside 0..SQ_SLOTS-1 is dropped; of a slot written twice, the
+  * later wins; SQ_LOCKS a step, from all handlers */
+diff --git a/mods/seq-events-dn1/dev.h b/mods/seq-events-dn1/dev.h
+index 6557746..5e0e31a 100644
+--- a/mods/seq-events-dn1/dev.h
++++ b/mods/seq-events-dn1/dev.h
+@@ -13,7 +13,9 @@
+ #define TR_STEPS        0x000           /* u16[64], big-endian: WORD_TRIG, WORD_LOCK */
+ #define TR_NOTES        0x1c0           /* s8[64][TR_STEP_NOTES]: each step's notes */
+ #define TR_STEP_NOTES   8
++#define TR_STEP_LEN     0x0c0           /* s8[64]: each step's LEN, -1 the track's */
+ #define TR_NOTE         0x3c0           /* u8 NOTE */
++#define TR_LEN          0x3c2           /* s8 the track's LEN */
+ #define TR_LENGTH       0x3c5           /* u16, unaligned: the length in per-track mode */
+ #define TR_ROOT         0x3cb           /* u8 the keyboard's ROOT */
+ #define TR_SCALE        0x3ce           /* s8 the keyboard's SCALE, -1 chromatic */
+@@ -28,6 +30,10 @@
+ #define LIST_STRIDE     8
+ #define LIST_MAX        79
+ 
++/* ev_fire_len (0.2): the fire's note length, LEN as the TRIG page's index */
++#define DEV_FIRE_LEN    1
++#define DEV_LEN_MAX     SQ_LEN_MAX
++
+ /* the API's notes are the firmware's: copied as they are */
+ typedef char dev_notes_match[SQ_NOTES == TR_STEP_NOTES ? 1 : -1];
+ 
+diff --git a/mods/seq-events-dn1/mod.json b/mods/seq-events-dn1/mod.json
+index 12f187c..737a7c7 100644
+--- a/mods/seq-events-dn1/mod.json
++++ b/mods/seq-events-dn1/mod.json
+@@ -1,6 +1,6 @@
+ {
+  "id": "seq-events",
+- "version": "0.1",
++ "version": "0.2",
+  "license": "GPL-2.0-or-later",
+  "title": "seq events",
+  "category": "Framework",
+@@ -108,6 +108,18 @@
+    "stock": "222f0034200b",
+    "op": "jsr",
+    "target": "sq_site_mvel"
++  },
++  {
++   "addr": "0x40094668",
++   "stock": "7f2900c0b287",
++   "op": "jsr",
++   "target": "sq_site_slen"
++  },
++  {
++   "addr": "0x40094a0e",
++   "stock": "7f2900c02847",
++   "op": "jsr",
++   "target": "sq_site_mlen"
+   }
+  ],
+  "ports": {
+@@ -208,6 +220,18 @@
+      "stock": "222f0034200b",
+      "op": "jsr",
+      "target": "sq_site_mvel"
++    },
++    {
++     "addr": "0x40094688",
++     "stock": "7f2900c0b287",
++     "op": "jsr",
++     "target": "sq_site_slen"
++    },
++    {
++     "addr": "0x40094a2e",
++     "stock": "7f2900c02847",
++     "op": "jsr",
++     "target": "sq_site_mlen"
+     }
+    ]
+   }
+@@ -232,7 +256,8 @@
+   "ev_gen_notes": 4,
+   "ev_fire_notes": 4,
+   "ev_fire_vel": 4,
+-  "ev_fire_locks": 4
++  "ev_fire_locks": 4,
++  "ev_fire_len": 4
+  },
+  "requires": [
+   "core"
+diff --git a/mods/seq-events-dn1/seq.s b/mods/seq-events-dn1/seq.s
+index bad5363..f4953f5 100644
+--- a/mods/seq-events-dn1/seq.s
++++ b/mods/seq-events-dn1/seq.s
+@@ -317,3 +317,49 @@ sq_site_slocks:
+         lea     12(%sp), %sp
+         move.l  #1500, %d0
+         rts
++
++| ---- note length (ev_fire_len, 0.2) -------------------------------------
++
++| 0x40094668, over `mvs.b 192(a1),d7; cmp.l d7,d1` (a1 = track_t + step, a0
++| = track_t, d1 = -1): the step's LEN, -1 for the track's (track_t + 962),
++| which the stock reads after the branch. d7 leaves as the length to play
++| (never -1), so the branch takes it into a4 as a step's own. d0 is live.
++        .globl  sq_site_slen
++sq_site_slen:
++        mvs.b   192(%a1), %d7
++        cmp.l   %d1, %d7
++        bne.s   1f
++        mvs.b   962(%a0), %d7
++1:      lea     -16(%sp), %sp
++        movem.l %d0-%d1/%a0-%a1, (%sp)
++        move.l  %d7, -(%sp)
++        move.l  %d3, -(%sp)             | step
++        move.l  %d4, -(%sp)             | track
++        jsr     sq_on_len
++        lea     12(%sp), %sp
++        move.l  %d0, %d7
++        movem.l (%sp), %d0-%d1/%a0-%a1
++        lea     16(%sp), %sp
++        cmp.l   %d7, %d1
++        rts
++
++| 0x40094a0e (MIDI), over `mvs.b 192(a1),d7; movea.l d7,a4` (then `cmp.l
++| d7,d1` with d1 = -1 and the track's LEN on equal); d2 = step, d4 = track
++        .globl  sq_site_mlen
++sq_site_mlen:
++        mvs.b   192(%a1), %d7
++        cmp.l   %d1, %d7
++        bne.s   1f
++        mvs.b   962(%a0), %d7
++1:      lea     -16(%sp), %sp
++        movem.l %d0-%d1/%a0-%a1, (%sp)
++        move.l  %d7, -(%sp)
++        move.l  %d2, -(%sp)
++        move.l  %d4, -(%sp)
++        jsr     sq_on_len
++        lea     12(%sp), %sp
++        move.l  %d0, %d7
++        movem.l (%sp), %d0-%d1/%a0-%a1
++        lea     16(%sp), %sp
++        movea.l %d7, %a4
++        rts
+diff --git a/mods/seq-events-dt1/dev.h b/mods/seq-events-dt1/dev.h
+index 9be7819..3121e82 100644
+--- a/mods/seq-events-dt1/dev.h
++++ b/mods/seq-events-dt1/dev.h
+@@ -12,7 +12,9 @@
+ /* a pattern buffer: SQ_TRACKS tracks, then its settings */
+ #define TRACK_STRIDE    911             /* a track's data (odd: every u16 read is unaligned) */
+ #define TR_STEPS        0x000           /* u16[64], big-endian: the step words */
++#define TR_STEP_LEN     0x0c0           /* s8[64]: each step's LEN, -1 the track's */
+ #define TR_NOTE_LOCKS   0x280           /* s8[64] x 4: note locks 1-4 (-1: the track's default) */
++#define TR_LEN          0x381           /* s8 the track's LEN */
+ #define TR_DEF_TRIGS    0x382           /* u16: the track's default SYN, FLTR, LFO trigs */
+ #define TR_NOTE         0x384           /* u8 NOTE (then 3 relative defaults for MIDI chords) */
+ #define TR_LENGTH       0x388           /* s16: the length in per-track mode */
+@@ -39,6 +41,10 @@ struct dev_notes {
+     int32_t n;                          /* +8 MIDI: how many (0-4); audio: the note */
+ };
+ 
++/* ev_fire_len (0.2): the fire's note length, LEN as the TRIG page's index */
++#define DEV_FIRE_LEN    1
++#define DEV_LEN_MAX     SQ_LEN_MAX
++
+ #define DEV_IN_DDR(p) ((uint32_t)(p) >= 0x40000000u && (uint32_t)(p) < 0x48000000u)
+ 
+ /* the pattern each track's last fire read: the active one, or the next at a switch (the tick
+diff --git a/mods/seq-events-dt1/mod.json b/mods/seq-events-dt1/mod.json
+index 3ba6556..d3e4dc4 100644
+--- a/mods/seq-events-dt1/mod.json
++++ b/mods/seq-events-dt1/mod.json
+@@ -1,6 +1,6 @@
+ {
+  "id": "seq-events",
+- "version": "0.1",
++ "version": "0.2",
+  "license": "GPL-2.0-or-later",
+  "title": "seq events",
+  "category": "Framework",
+@@ -109,6 +109,18 @@
+    "stock": "41f2380072ff",
+    "op": "jsr",
+    "target": "sq_site_mvel"
++  },
++  {
++   "addr": "0x4006f5e8",
++   "stock": "7f2900c0b087",
++   "op": "jsr",
++   "target": "sq_site_slen"
++  },
++  {
++   "addr": "0x4006f9b0",
++   "stock": "712900c0b280",
++   "op": "jsr",
++   "target": "sq_site_mlen"
+   }
+  ],
+  "ports": {
+@@ -210,6 +222,18 @@
+      "stock": "41f2380072ff",
+      "op": "jsr",
+      "target": "sq_site_mvel"
++    },
++    {
++     "addr": "0x4006f5e8",
++     "stock": "7f2900c0b087",
++     "op": "jsr",
++     "target": "sq_site_slen"
++    },
++    {
++     "addr": "0x4006f9b0",
++     "stock": "712900c0b280",
++     "op": "jsr",
++     "target": "sq_site_mlen"
+     }
+    ]
+   }
+@@ -234,7 +258,8 @@
+   "ev_gen_notes": 4,
+   "ev_fire_notes": 4,
+   "ev_fire_vel": 4,
+-  "ev_fire_locks": 4
++  "ev_fire_locks": 4,
++  "ev_fire_len": 4
+  },
+  "requires": [
+   "core"
+diff --git a/mods/seq-events-dt1/seq.s b/mods/seq-events-dt1/seq.s
+index 47944a4..b5ca402 100644
+--- a/mods/seq-events-dt1/seq.s
++++ b/mods/seq-events-dt1/seq.s
+@@ -348,3 +348,48 @@ sq_site_slocks:
+         lea     12(%sp), %sp
+         move.l  #1500, %d0
+         rts
++
++| ---- note length (ev_fire_len, 0.2) -------------------------------------
++
++| 0x4006f5e8, over `mvs.b 192(a1),d7; cmp.l d7,d0` (a1 = track_t + step, a0
++| = track_t, d0 = -1): the step's LEN, -1 for the track's (track_t + 897),
++| which the stock reads after the branch. d7 leaves as the length to play
++| (never -1), so the branch keeps it as a step's own.
++        .globl  sq_site_slen
++sq_site_slen:
++        mvs.b   192(%a1), %d7
++        cmp.l   %d0, %d7
++        bne.s   1f
++        mvs.b   897(%a0), %d7
++1:      lea     -16(%sp), %sp
++        movem.l %d0-%d1/%a0-%a1, (%sp)
++        move.l  %d7, -(%sp)
++        move.l  %d4, -(%sp)             | step
++        move.l  %d5, -(%sp)             | track
++        jsr     sq_on_len
++        lea     12(%sp), %sp
++        move.l  %d0, %d7
++        movem.l (%sp), %d0-%d1/%a0-%a1
++        lea     16(%sp), %sp
++        cmp.l   %d7, %d0
++        rts
++
++| 0x4006f9b0 (MIDI), over `mvs.b 192(a1),d0; cmp.l d0,d1` (d1 = -1; on
++| equal the track's LEN, track_t + 897, into a4); d6 = track, d4 = step
++        .globl  sq_site_mlen
++sq_site_mlen:
++        mvs.b   192(%a1), %d0
++        cmp.l   %d1, %d0
++        bne.s   1f
++        mvs.b   897(%a0), %d0
++1:      lea     -12(%sp), %sp
++        movem.l %d1/%a0-%a1, (%sp)
++        move.l  %d0, -(%sp)
++        move.l  %d4, -(%sp)
++        move.l  %d6, -(%sp)
++        jsr     sq_on_len
++        lea     12(%sp), %sp
++        movem.l (%sp), %d1/%a0-%a1
++        lea     12(%sp), %sp
++        cmp.l   %d0, %d1
++        rts
+diff --git a/mods/seq-events/seq.c b/mods/seq-events/seq.c
+index f9bc811..67620a2 100644
+--- a/mods/seq-events/seq.c
++++ b/mods/seq-events/seq.c
+@@ -9,6 +9,7 @@
+  *     sq_on_notes: the stored notes, or a generated trig's NOTE, in a buffer of ours:
+  *       ev_gen_notes' handlers, then ev_fire_notes'.
+  *     sq_on_vel: ev_fire_vel's; sq_on_locks: ev_fire_locks' (audio tracks).
++ *     sq_on_len: ev_fire_len's, on a device whose layer offers it (DEV_FIRE_LEN).
+  *   sq_track_info, sq_stored: the pattern the device layer names, read as data when asked (no
+  *     object methods: a handler may run before the project objects are built).
+  *   ev_tick: the clocks' lengths (order 10), and the re-arms asked for (order 90). */
+@@ -23,6 +24,9 @@ extern const ev_gen_notes_fn ev_gen_notes[];
+ extern const ev_fire_notes_fn ev_fire_notes[];
+ extern const ev_fire_vel_fn ev_fire_vel[];
+ extern const ev_fire_locks_fn ev_fire_locks[];
++#ifdef DEV_FIRE_LEN
++extern const ev_fire_len_fn ev_fire_len[];
++#endif
+ 
+ struct sq_clock sq_clock[SQ_TRACKS];
+ static int32_t clock_len[SQ_TRACKS];    /* the UI task's: a 1-step track wraps at every step */
+@@ -222,6 +226,22 @@ int32_t sq_on_vel(int32_t track, int32_t step, int32_t vel)
+     return vel;
+ }
+ 
++#ifdef DEV_FIRE_LEN
++/* The note's length, the device's LEN value as the fire would play it (the step's lock, else the
++ * track's LEN) */
++int32_t sq_on_len(int32_t track, int32_t step, int32_t len)
++{
++    const ev_fire_len_fn *h;
++    if ((uint32_t)track >= SQ_TRACKS || !ev_fire_len[0])
++        return len;
++    for (h = ev_fire_len; *h; h++) {
++        (*h)(track, step, &len);
++        len = len < 0 ? 0 : len > DEV_LEN_MAX ? DEV_LEN_MAX : len;
++    }
++    return len;
++}
++#endif
++
+ /* The audio tracks' fire's lock list (0: none), after its own locks */
+ void sq_on_locks(int32_t track, int32_t step, void *list)
+ {

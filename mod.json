@@ -1,0 +1,85 @@
+{
+ "id": "digiseq-dt",
+ "version": "0.2",
+ "title": "DIGISEQ",
+ "category": "Sequencer",
+ "license": "GPL-2.0-or-later",
+ "author": "Robbie",
+ "description": "DIGISEQ for the Digitakt mk1: sequencer types a track plays in place of its own trigs, chosen per track (TYPE: OFF, SNAKE or 185), on all 8 audio tracks (a note is the sample's pitch) and the 8 MIDI tracks. SNAKE: a Cartesian sequencer after MDD Snake (and Make Noise's Rene), eight cells in a 4 x 2 grid walked by a path (DIGISNAKE for Digitakt 0.2). 185: a stage sequencer after ML-185 (and RYK's M-185): eight stages, each with a pitch, a velocity, a length of 1-8 clock pulses and a mode (OFF, ONE, ALL every DIV pulses, HOLD for the whole stage), with DIR, STAGES, CLOCK (1/8 .. 2X), SCALE, RANGE, note LEN and SHIFT. Press TRIG on the TRIG page to open it; hold TRIG + UP / DOWN changes TYPE, TRIG + YES randomises a page, FUNC + YES the note pages, TRIG + REC / STOP copy and paste, TRIG + PLAY clears, TRIG + FUNC + REC prints into the track. Not saved with the project yet: print to keep. For OS 1.53 and 1.54; needs core 3.0 and seq-events 0.2 (ev_fire_len). Not with DIGISNAKE for Digitakt, which it replaces.",
+ "device": "digitakt-mk1",
+ "os": "1.53",
+ "sources": [
+  "digiseq_dt.c"
+ ],
+ "cflags": [
+  "-DDSQ_PATTERN_PP=0x4199dc38",
+  "-DDSQ_TRANSPORT=0x4199dc2c",
+  "-fno-tree-loop-distribute-patterns"
+ ],
+ "ports": {
+  "1.54": {
+   "cflags": [
+    "-DDSQ_PATTERN_PP=0x4199ec38",
+    "-DDSQ_TRANSPORT=0x4199ec2c",
+    "-fno-tree-loop-distribute-patterns"
+   ]
+  }
+ },
+ "subscribe": [
+  {
+   "event": "ev_gen_trig",
+   "fn": "digiseq_trig",
+   "order": 50
+  },
+  {
+   "event": "ev_gen_notes",
+   "fn": "digiseq_notes",
+   "order": 50
+  },
+  {
+   "event": "ev_fire_vel",
+   "fn": "digiseq_vel",
+   "order": 50
+  },
+  {
+   "event": "ev_fire_len",
+   "fn": "digiseq_len",
+   "order": 50
+  },
+  {
+   "event": "ev_fire_cond",
+   "fn": "digiseq_cond",
+   "order": 50
+  },
+  {
+   "event": "ev_key",
+   "fn": "digiseq_key",
+   "order": 40
+  },
+  {
+   "event": "ev_enc",
+   "fn": "digiseq_enc",
+   "order": 40
+  },
+  {
+   "event": "ev_tick",
+   "fn": "digiseq_tick",
+   "order": 50
+  },
+  {
+   "event": "ev_draw",
+   "fn": "digiseq_draw",
+   "order": 90
+  }
+ ],
+ "resources": {
+  "core": "3.0"
+ },
+ "requires": [
+  "core",
+  "seq-events"
+ ],
+ "weak": [
+  "dj_starts"
+ ]
+}
