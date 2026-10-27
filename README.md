@@ -135,7 +135,7 @@ PAGE is the TRIG key, held.
 
 ## With DIRECT JUMP
 
-With DIRECT JUMP for Digitakt 1.0 in the build, a pattern started by its START ON BAR starts every track's
+With [DIRECT JUMP for Digitakt](https://github.com/ClaidArremer/digitakt-directjump) 1.0 in the build, a pattern started by its START ON BAR starts every track's
 sequence from the beginning too, SNAKE and 185 alike. A legato jump leaves them playing on.
 
 ## Changes
