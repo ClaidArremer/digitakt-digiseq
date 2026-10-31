@@ -1,14 +1,15 @@
 {
  "id": "digiseq-dt",
- "version": "0.2",
+ "version": "0.5",
  "title": "DIGISEQ",
  "category": "Sequencer",
  "license": "GPL-2.0-or-later",
  "author": "Robbie",
- "description": "DIGISEQ for the Digitakt mk1: sequencer types a track plays in place of its own trigs, chosen per track (TYPE: OFF, SNAKE or 185), on all 8 audio tracks (a note is the sample's pitch) and the 8 MIDI tracks. SNAKE: a Cartesian sequencer after MDD Snake (and Make Noise's Rene), eight cells in a 4 x 2 grid walked by a path (DIGISNAKE for Digitakt 0.2). 185: a stage sequencer after ML-185 (and RYK's M-185): eight stages, each with a pitch, a velocity, a length of 1-8 clock pulses and a mode (OFF, ONE, ALL every DIV pulses, HOLD for the whole stage), with DIR, STAGES, CLOCK (1/8 .. 2X), SCALE, RANGE, note LEN and SHIFT. Press TRIG on the TRIG page to open it; hold TRIG + UP / DOWN changes TYPE, TRIG + YES randomises a page, FUNC + YES the note pages, TRIG + REC / STOP copy and paste, TRIG + PLAY clears, TRIG + FUNC + REC prints into the track. Not saved with the project yet: print to keep. For OS 1.53 and 1.54; needs core 3.0 and seq-events 0.2 (ev_fire_len). Not with DIGISNAKE for Digitakt, which it replaces.",
+ "description": "DIGISEQ for the Digitakt mk1: sequencer types a track plays in place of its own trigs, chosen per track (TYPE: OFF, SNAKE, 185 or ARP), on all 8 audio tracks (a note is the sample's pitch) and the 8 MIDI tracks. SNAKE: a Cartesian sequencer after MDD Snake (and Make Noise's Rene), eight cells in a 4 x 2 grid walked by a path (DIGISNAKE for Digitakt 0.2). 185: a stage sequencer after ML-185 (and RYK's M-185): eight stages, each with a pitch, a velocity, a length of 1-8 clock pulses and a mode (OFF, ONE, ALL every DIV pulses, HOLD for the whole stage), with DIR, STAGES, CLOCK (1/8 .. 2X), SCALE, RANGE, note LEN and SHIFT. ARP: an arpeggiator the track's own note trigs play: a trig's note (a MIDI track's chord) is held for its LEN (HOLD: until the next trig) and arpeggiated by MODE (UP, DOWN, UP-DN, UP+DN, CONV, DIV, PINKY, THUMB, ORDER, RAND, SHUF) over RNG octaves at SPD, through a 16-step offset sequence, with N.LEN, RPT and WALK; in slice mode it arpeggiates slices. ARP also plays the keys held in keyboard mode (FUNC + TRK) on an audio track, HOLD latching them, while the sequencer plays; live recording (REC + PLAY) records the arp's notes into the track as trigs and sets TYPE to OFF when it stops. Press TRIG on the TRIG page to open it; hold TRIG + UP / DOWN changes TYPE, TRIG + YES randomises a page, FUNC + YES the note pages, TRIG + REC / STOP copy and paste, TRIG + PLAY clears, TRIG + FUNC + REC prints into the track (not ARP: record it live). Not saved with the project yet: print to keep. For OS 1.53 and 1.54; needs core 3.0 and seq-events 0.2 (ev_fire_len). Not with DIGISNAKE for Digitakt, which it replaces.",
  "device": "digitakt-mk1",
  "os": "1.53",
  "sources": [
+  "kbsites.s",
   "digiseq_dt.c"
  ],
  "cflags": [
@@ -81,5 +82,19 @@
  ],
  "weak": [
   "dj_starts"
+ ],
+ "sites": [
+  {
+   "addr": "0x4002930e",
+   "stock": "4e56ffc0707f",
+   "op": "jmp",
+   "target": "dsq_site_kbon"
+  },
+  {
+   "addr": "0x40028c78",
+   "stock": "4fefffe848d77c04",
+   "op": "jmp",
+   "target": "dsq_site_kboff"
+  }
  ]
 }

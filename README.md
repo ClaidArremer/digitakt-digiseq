@@ -6,7 +6,7 @@ Digitone, and the Digitone's do not run on a Digitakt.
 
 Sequencer types for the **Elektron Digitakt mk1**, as an [elekloader](https://github.com/irpina/elekloader) mod
 (id `digiseq-dt`). Each track picks its own **TYPE** and plays it in place of its own trigs, so T1 can play
-SNAKE, T2 185, and T3 its own trigs. It works on all 8 audio tracks (a note is the sample's pitch, like a note
+SNAKE, T2 185, T3 ARP, and T4 its own trigs. It works on all 8 audio tracks (a note is the sample's pitch, like a note
 lock) and the 8 MIDI tracks, for external gear.
 
 - **SNAKE**: a Cartesian sequencer after Maxime Dangles' MDD Snake and Make Noise's René. Eight cells in a
@@ -16,6 +16,12 @@ lock) and the 8 MIDI tracks, for external gear.
   M-185 for the Roland System 100m). Eight stages, each with a pitch, a velocity, a **length of 1–8 clock
   pulses** (how long the stage plays before the next) and a **mode**: rest, one note, a note every pulse, or
   one note held for the whole stage.
+- **ARP**: an arpeggiator, played by the keys you hold in keyboard mode (FUNC + TRK, audio tracks, HOLD to
+  latch) or by the track's own note trigs, and recorded live into the track with REC + PLAY. The notes held are
+  arpeggiated over 1–4 octaves, through a 16-step offset sequence. In
+  slice mode a note is a slice, so ARP arpeggiates slices; on a single-cycle waveform it plays like a synth's
+  arp. **ARP is for the Digitakt only**: the Digitone has its own arpeggiator, so DIGISEQ for Digitone has no
+  ARP type.
 
 By Robbie (designed and tested on a Digitakt mk1, OS 1.54). GPL-2.0-or-later.
 
@@ -27,6 +33,8 @@ By Robbie (designed and tested on a Digitakt mk1, OS 1.54). GPL-2.0-or-later.
 | ![PITCH](docs/185-1-pitch.png) | ![PULSES](docs/185-3-pulses.png) |
 | **185: MODE** (playing) | **185: SETUP** |
 | ![MODE](docs/185-4-mode.png) | ![SETUP](docs/185-6-setup.png) |
+| **ARP: OFFSETS** | **ARP: ARP** |
+| ![OFFSETS](docs/arp-1-offsets.png) | ![ARP](docs/arp-2-arp.png) |
 | **SNAKE: NOTES** | **SNAKE: PATH** |
 | ![NOTES](docs/snake-1-notes.png) | ![PATH](docs/snake-4-path.png) |
 
@@ -47,14 +55,14 @@ of the note a step plays. 185's held stages need it. Mods built for seq-events 0
 
 ## Install
 
-In the elekloader app, add both files for your OS from `elemods/`: `digiseq-dt-0.2-os1.54.elemod` and
+In the elekloader app, add both files for your OS from `elemods/`: `digiseq-dt-0.5-os1.54.elemod` and
 `seq-events-dt-0.2-os1.54.elemod` (or the two `-os1.53` files). Untick DIGISNAKE and any older seq-events, keep
 the app's core ticked, build, and send the firmware to the Digitakt. From the command line:
 
 ```
 python -m elekloader.patch --stock Digitakt_OS1.54.syx \
   --mod core-4.1-os1.54.elemod --mod elemods/seq-events-dt-0.2-os1.54.elemod \
-  --mod elemods/digiseq-dt-0.2-os1.54.elemod --out Digitakt_digiseq.syx
+  --mod elemods/digiseq-dt-0.5-os1.54.elemod --out Digitakt_digiseq.syx
 ```
 
 It links with PUMP for Digitakt 1.3, DH-101 0.25, Digi Mono 0.24, machine-pages 1.3, digihealth 1.0.1, the
@@ -66,7 +74,7 @@ Press **TRIG** twice: the first press shows the Digitakt's TRIG page, the second
 is held). TRIG again goes back to the TRIG page; another page key goes to its page, and a menu opening over the
 pages (GLOBAL, the pattern menu ...) closes it.
 
-The last page's knob A is **TYPE**: **OFF**, **SNAKE** or **185**. Hold **TRIG + UP / DOWN** to step through
+The last page's knob A is **TYPE**: **OFF**, **SNAKE**, **185** or **ARP**. Hold **TRIG + UP / DOWN** to step through
 the types from any page. With a type on, the track plays it in place of its own trigs; lock trigs still play,
 and trig conditions or probabilities on the track's own trigs do not stop a step the type plays. OFF keeps
 every type's settings, so the pages still show and edit the last type.
@@ -111,6 +119,75 @@ note, and the line underneath the pulse playing. Knobs A–H are stages 1–8.
 
 The title line shows the sequence's length in steps (13ST: 13 steps), which may not match the pattern's.
 
+## ARP
+
+ARP plays from the keys you hold in keyboard mode, and from the track's own note trigs.
+
+### From the keys (keyboard mode)
+
+On an audio track with TYPE ARP, turn the keyboard on (**FUNC + TRK**) and press **PLAY**: the keys you hold are
+the arp's notes, in whatever KB SCALE, ROOT, FOLD and octave the keyboard is set to (up to 8 at once; a 9th lets go
+of the oldest). The arp starts on the next step after the first key goes down and keeps time with the sequencer, at
+SPD. While keys hold notes they play the arp in place of the track's trigs; let go of them all and the trigs play
+again. Every arp note plays at the keyboard's velocity.
+
+- **HOLD on** latches: the notes stay when you let go. The next key pressed with none held starts a new set; keys
+  added while others are held join it. HOLD off lets go of the latched notes.
+- **Stopped**, a key plays its note as usual (no arp: the arp keeps time with the sequencer) and is still held for
+  the arp, so with HOLD on you can latch a set and then press PLAY.
+- The title line shows **KB** and how many notes are held (T1 ARP KB3).
+
+### Recording it
+
+Live recording (**REC + PLAY**) on an ARP track records what the arp plays from the keys: each arp note goes onto its
+step as a note trig, with the note as its note lock, the keyboard's velocity and N.LEN as its LEN (TRK: the track's
+LEN), no micro timing and no condition. It records over a trig already on that step; the steps the arp does not play
+keep what they had. While recording with no key held, the track's trigs play as they are stored (no arp), so you hear
+what you have recorded so far.
+
+When the recording stops (REC off, or STOP), **TYPE goes to OFF** on each track it recorded into, so the notes play
+back as recorded. Turn TYPE back to ARP to play the arp again (the trigs you recorded would then start it, as any
+trigs do). Grid recording (REC alone) is unchanged: trig keys place trigs as usual.
+
+### From the trigs
+
+The track's own note trigs work like keys held down. Put a trig where the arp should start and give it
+a LEN (the TRIG page's LEN, or the track's): the trig's note is held that long and the arp plays it at SPD, the
+trig's own step playing the first note. A new trig starts it again with its note. With **HOLD** on, a trig's
+note is held until the next trig (or STOP), whatever its LEN; a LEN of INF does the same.
+
+- **Audio tracks**: the trig's note (its note lock, else the track's NOTE) is arpeggiated over RNG octaves. In
+  slice mode, where a note is a slice, this steps through slices: an octave is 12 slices on.
+- **MIDI tracks**: the trig's whole chord (the note and its intervals) is the notes held.
+- **Velocity**: every arp note plays the trig's velocity.
+- **Trig conditions and probability** on a trig decide whether that trig starts the arp, as they decide whether
+  it plays. The arp's own notes always play.
+- **Locks**: a trig's parameter locks belong to its own step; the arp's later notes play without them.
+
+| Page | Knobs | Also |
+|---|---|---|
+| OFFSETS | The 16 offset steps, −24 to +24 semitones (slices) added to the arp's notes in turn, one step a note. Knobs A–H edit steps 1–8 or 9–16: press a trig key to select a step and its half | **FUNC + trig key**: LEN, the steps the offsets play (1–16). UP / DOWN: all a semitone (FUNC: an octave). FUNC + knob: −24 / −12 / 0 / +12 / +24 |
+| ARP | The settings below | |
+
+| Knob | ARP | Values |
+|---|---|---|
+| A | TYPE | OFF, SNAKE, 185, ARP |
+| B | MODE | UP, DOWN, UP-DN (the ends once), UP+DN (the ends twice), CONV (outside in), DIV (inside out), PINKY (each note, then the top), THUMB (the bottom, then each note), ORDER (as played: a MIDI chord's order), RAND, SHUF (each note once a cycle, in a new order each cycle) |
+| C | SPD | 1/16, 1/8, 3/16, 1/4, 1/2, 1/1: a note every 1, 2, 3, 4, 8 or 16 steps (at the track's speed) |
+| D | RNG | 1–4 octaves |
+| E | N.LEN | Each arp note's length: TRK (the track's LEN), 1/32, 1/16, 1/8, 1/4, 1/2 |
+| F | RPT | Each note played 1–4 times before the next |
+| G | WALK | −12 to +12: every arp cycle moves the whole arp by this many semitones (slices), back to 0 past ±48 |
+| H | HOLD | OFF: a trig's note is held for its LEN. ON: until the next trig |
+
+The OFFSETS page draws the steps as bars from a centre line: the steps past LEN as dots, the step selected marked
+on top, the half on the knobs underlined, the step playing framed.
+
+ARP's notes come from the sequencer's steps, so SPD is 1/16 at the fastest, and there are no triplet speeds. ARP
+does not run from incoming MIDI notes: only from the keyboard and the track's trigs.
+
+**PRINT** does nothing on an ARP track ("PRINT N/A FOR ARP"): record it live instead (above).
+
 ## SNAKE
 
 As DIGISNAKE for Digitakt: NOTES, GATES (trig keys 1–8 toggle a cell), VELOCITY and PATH (TYPE, SHAPE, DIR,
@@ -123,13 +200,13 @@ PAGE is the TRIG key, held.
 | Keys | What happens |
 |---|---|
 | PAGE + UP / DOWN | The next / previous TYPE |
-| PAGE + YES | Randomise the page shown (SNAKE's PATH: all but TYPE and SCALE; 185's SETUP: DIR, STAGES, RANGE and SHIFT) |
+| PAGE + YES | Randomise the page shown (SNAKE's PATH: all but TYPE and SCALE; 185's SETUP: DIR, STAGES, RANGE and SHIFT; ARP's ARP: MODE, SPD, RNG, RPT and WALK; ARP's OFFSETS: the offsets and LEN) |
 | PAGE + NO | Back to how the track was when PAGE went down, a print included |
 | PAGE + PLAY | Clear the page shown |
 | PAGE + REC | Copy the page shown |
 | PAGE + STOP | Paste it onto this track (only onto a track of the same type) |
-| PAGE + FUNC + REC | **Print**: write what the track plays into its own trigs, note locks and velocities over the track's length (185: held and LEN-set notes as LEN locks), then set TYPE to OFF |
-| FUNC + YES | Randomise the note pages together (SNAKE: NOTES, GATES, VELOCITY; 185: PITCH, VELOCITY, PULSES, MODE) |
+| PAGE + FUNC + REC | **Print** (not on an ARP track): write what the track plays into its own trigs, note locks and velocities over the track's length (185: held and LEN-set notes as LEN locks), then set TYPE to OFF |
+| FUNC + YES | Randomise the note pages together (SNAKE: NOTES, GATES, VELOCITY; 185: PITCH, VELOCITY, PULSES, MODE; ARP: OFFSETS and MODE) |
 | FUNC + NO | Back to before the last run of FUNC + YES |
 | FUNC + knob | Jump to preset values (pitches, velocities, RANGE) |
 
@@ -140,6 +217,9 @@ sequence from the beginning too, SNAKE and 185 alike. A legato jump leaves them 
 
 ## Changes
 
+- **0.5**: live recording (REC + PLAY) records the arp's notes from the keys into the track, then sets TYPE to OFF.
+- **0.4**: ARP plays the keys held in keyboard mode (FUNC + TRK) on an audio track, with HOLD latching them.
+- **0.3**: **ARP**, a third type: an arpeggiator played by the track's note trigs (Digitakt only).
 - **0.2**: PRINT puts each printed note on its step with no trig condition, so a trig left there from before
   can no longer shift it (micro timing) or mute it on some loops (a condition such as 1:2).
 - **0.1**: the first version: SNAKE (from DIGISNAKE for Digitakt 0.3) and 185.
@@ -148,7 +228,8 @@ sequence from the beginning too, SNAKE and 185 alike. A legato jump leaves them 
 
 DIGISEQ uses seq-events' step-fire events: `ev_gen_trig` decides whether a step fires, `ev_gen_notes` its note,
 `ev_fire_vel` its velocity, `ev_fire_len` its length and `ev_fire_cond` lets a step it plays through a stored
-trig's condition. A HOLD sets its note's LEN to the stage's length in steps (the Digitakt's LEN values are the
+trig's condition (ARP leaves a note trig's condition to decide, and starts in `ev_gen_notes`, which runs only for a
+step that plays). A HOLD sets its note's LEN to the stage's length in steps (the Digitakt's LEN values are the
 Digitone's: index 14 is one step, 30 two, 46 four, 62 eight). The page reads the key dispatcher's screens to
 know when the TRIG page is up and draws over it. PRINT and 2X write the active pattern: 911 bytes a track, its
 step words at +0, each step's VEL at +0x80 and LEN at +0xc0, note lock 1 at +0x280, the track's speed at
@@ -158,6 +239,13 @@ step words at +0, each step's VEL at +0x80 and LEN at +0xc0, note lock 1 at +0x2
 tracks' and the MIDI tracks'), where the fire reads a step's LEN (its lock at +0xc0, else the track's at
 +0x381). The change to elekloader's source is in `seq-events/ev_fire_len.patch` (the Digitone's and the
 Digitakt's).
+
+The keyboard: two code sites (`kbsites.s`), the same in OS 1.53 and 1.54. The keyboard plays a key's note through
+one routine, `0x4002930e` (it is handed the key, the track, the note and the velocity), and lets the key go through
+another, `0x40028c78`. DIGISEQ enters each by a jmp over its first instructions: on an ARP track it keeps the key's
+note for the arp (and, while playing, returns before the stock note plays); otherwise the routine runs as stock. Live recording: the keyboard's controller (the routine's first argument) keeps
+the sequencer's state at +152, where +353 is REC and +361 live recording; ARP writes each recorded note on its step
+(note lock +0x280, velocity +0x80, LEN +0xc0, micro timing +0x100 cleared, condition +0x200 none).
 
 ## Building
 
@@ -169,7 +257,7 @@ python -m elekloader.sdk.build --stock Digitakt_OS1.54.syx .
 
 ## Credits and third-party code
 
-DIGISEQ is Robbie's own work, written with Claude (Anthropic); every line of `digiseq_dt.c` is new. The ideas
+DIGISEQ is Robbie's own work, written with Claude (Anthropic); every line of `digiseq_dt.c` and `kbsites.s` is new. The ideas
 come from **MDD Snake** (Maxime Dangles' free Max for Live device), **Make Noise René**, **ML-185** (Nico
 Starke's free Max for Live device) and **RYK's M-185**; no code from any of them. The random numbers use
 Marsaglia's xorshift, a public algorithm.

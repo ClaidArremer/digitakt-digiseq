@@ -10,6 +10,14 @@
  *          device, itself after RYK's M-185): eight stages, each with a pitch,
  *          a velocity, a length in clock pulses (1-8) and a mode: OFF, ONE,
  *          ALL (every DIV pulses) or HOLD (one note for the whole stage).
+ *   ARP    an arpeggiator (0.3), played by the track's own note trigs: a
+ *          trig's note (a MIDI track's chord) is held for the trig's LEN
+ *          (HOLD: until the next trig) and arpeggiated over RNG octaves by
+ *          MODE, at SPD, through a 16-step offset sequence, with RPT repeats
+ *          of each note and a WALK that moves it all each cycle. In slice
+ *          mode a note is a slice, so it arpeggiates slices.
+ *          0.4: it also plays the keys held in keyboard mode (FUNC + TRK)
+ *          on an audio track, HOLD latching them (kbsites.s).
  *
  * The page opens with TRIG pressed on the TRIG page (press TRIG twice). The
  * Digitakt's core cannot add a page to a view, so DIGISEQ draws its page over
@@ -91,8 +99,9 @@ static void sayf(const char *fmt, ...)
 }
 #define POPUP(...) sayf(__VA_ARGS__)
 
-enum { E_SNAKE = 1, E_185 = 2 };
-static const char *const type_names[3] = { "OFF", "SNAKE", "185" };
+enum { E_SNAKE = 1, E_185 = 2, E_ARP = 3 };
+#define NTYPES 4
+static const char *const type_names[NTYPES] = { "OFF", "SNAKE", "185", "ARP" };
 
 /* ==== the project's data ================================================ */
 
@@ -128,6 +137,18 @@ struct track {
     unsigned char pad[12];
 };                              /* 64 bytes */
 struct track digiseq_trk[TRACKS];
+
+/* ARP: the ARP page's settings and the offset sequence */
+#define OFFS     16
+#define OFF_MAX  24
+enum { A_TYPE, A_MODE, A_SPD, A_RNG, A_NLEN, A_RPT, A_WALK, A_HOLD, NASETS };
+struct arpset {
+    signed char off[OFFS];      /* semitones (slices) added, a step an arp note */
+    unsigned char set[NASETS];  /* set[A_TYPE] unused (struct track's); WALK + WALK_MAX */
+    unsigned char len;          /* the offsets played, 1-16 */
+    unsigned char pad[7];
+};                              /* 32 bytes */
+struct arpset digiseq_arp[TRACKS];
 
 /* ==== shared tables ===================================================== */
 
@@ -167,6 +188,28 @@ static const unsigned char sset_min[NSETS] = { 0, 0, 1, 0, 0, 1, 0, 0 };
 static const unsigned char sset_max[NSETS] = { 0, DIRS - 1, CELLS, 8, SCALES - 1, NOTE_MAX, NLENS - 1, CELLS - 1 };
 static const char *const sset_labels[NSETS] = { "TYPE", "DIR", "STAGES", "CLOCK", "SCALE", "RANGE", "LEN", "SHIFT" };
 static const char *const nlen_names[NLENS] = { "TRK", "1/32", "1/16", "1/8", "1/4" };
+
+/* ARP's page. MODE: UP, DOWN, UP-DN (the ends once), UP+DN (the ends twice),
+ * CONV (outside in), DIV (inside out), PINKY (each note, then the top),
+ * THUMB (the bottom, then each note), ORDER (as played), RAND, SHUF (each
+ * note once a cycle, in a new order). SPD: steps a note (no faster than the
+ * sequencer's step: 1/16). */
+enum { AM_UP, AM_DOWN, AM_UPDN, AM_UPDN2, AM_CONV, AM_DIV, AM_PINKY, AM_THUMB, AM_ORDER,
+       AM_RAND, AM_SHUF, AMODES };
+static const char *const amode_names[AMODES] = {
+    "UP", "DOWN", "UP-DN", "UP+DN", "CONV", "DIV", "PINKY", "THUMB", "ORDER", "RAND", "SHUF"
+};
+#define SPDS 6
+static const unsigned char spd_steps[SPDS] = { 1, 2, 3, 4, 8, 16 };
+static const char *const spd_names[SPDS] = { "1/16", "1/8", "3/16", "1/4", "1/2", "1/1" };
+#define ANLENS 6
+static const unsigned char anlen_halves[ANLENS] = { 0, 1, 2, 4, 8, 16 };
+static const char *const anlen_names[ANLENS] = { "TRK", "1/32", "1/16", "1/8", "1/4", "1/2" };
+#define WALK_MAX 12
+#define WALK_WRAP 48                        /* past +-48 the walk starts again from 0 */
+static const unsigned char aset_min[NASETS] = { 0, 0, 0, 1, 0, 1, 0, 0 };
+static const unsigned char aset_max[NASETS] = { 0, AMODES - 1, SPDS - 1, 4, ANLENS - 1, 4, 2 * WALK_MAX, 1 };
+static const char *const aset_labels[NASETS] = { "TYPE", "MODE", "SPD", "RNG", "N.LEN", "RPT", "WALK", "HOLD" };
 
 /* DIV (SNAKE) and CLOCK (185): sequencer steps a move (1 = 1X, 2 = 1/2, 4 =
  * 1/4, 8 = 1/8), or 0: 2X, the track itself at twice its speed (per-track
@@ -303,6 +346,24 @@ static void stages_check(struct stages *g)
             g->set[c] = c == S_CLOCK ? 1 : c == S_RANGE ? 12 : c == S_STAGES ? CELLS : sset_min[c];
 }
 
+static void arp_defaults(struct arpset *a)
+{
+    int c;
+    for (c = 0; c < OFFS; c++)
+        a->off[c] = 0;
+    a->set[A_TYPE] = 0;
+    a->set[A_MODE] = AM_UP;
+    a->set[A_SPD] = 0;                      /* 1/16 */
+    a->set[A_RNG] = 2;
+    a->set[A_NLEN] = 2;                     /* 1/16 */
+    a->set[A_RPT] = 1;
+    a->set[A_WALK] = WALK_MAX;              /* 0 */
+    a->set[A_HOLD] = 0;
+    a->len = OFFS;
+    for (c = 0; c < 7; c++)
+        a->pad[c] = 0;
+}
+
 static void track_defaults(struct track *k)
 {
     int c;
@@ -339,6 +400,7 @@ static void changed(void)
 struct whole {
     struct snake s;
     struct track k;
+    struct arpset a;
 };
 static struct whole hold_copy[TRACKS], run_copy[TRACKS];
 static unsigned char hold_valid[TRACKS], run_valid[TRACKS], run_active[TRACKS];
@@ -356,11 +418,13 @@ static void get_whole(int t, struct whole *w)
 {
     copy(&w->s, &digiseq_snake[t], sizeof w->s);
     copy(&w->k, &digiseq_trk[t], sizeof w->k);
+    copy(&w->a, &digiseq_arp[t], sizeof w->a);
 }
 static void put_whole(int t, const struct whole *w)
 {
     copy(&digiseq_snake[t], &w->s, sizeof w->s);
     copy(&digiseq_trk[t], &w->k, sizeof w->k);
+    copy(&digiseq_arp[t], &w->a, sizeof w->a);
     digiseq_snake[t].set[P_ON] = (unsigned char)(w->k.on && w->k.eng == E_SNAKE);
 }
 
@@ -370,6 +434,7 @@ static void put_together(void)              /* the first UI frame: every track's
     for (t = 0; t < TRACKS; t++) {
         snake_defaults(&digiseq_snake[t]);
         track_defaults(&digiseq_trk[t]);
+        arp_defaults(&digiseq_arp[t]);
         reset_req[t] = 1;
     }
     data_ready = 1;
@@ -566,6 +631,334 @@ static void eng_advance(int t, unsigned long *rnd)
         snake_advance(&play[t], &digiseq_snake[t], snake_len(&digiseq_snake[t]), rnd);
 }
 
+/* ---- ARP ----
+ * The track's own note trigs play it. A note trig is a key going down: its
+ * note (a MIDI track's chord: up to 4 notes) is held for the trig's LEN
+ * (the step's LEN lock, else the track's; INF, or HOLD on: until the next
+ * note trig) and the arp plays a note every SPD steps from the trig's step.
+ * The trig itself plays the first. Whether a trig starts the arp is the
+ * trig's own business: its condition or probability decides (the arp starts
+ * in ev_gen_notes, which runs only for a step that plays); the arp's other
+ * notes play whatever is stored on their steps. The step's LEN only sets how
+ * long the arp runs: every arp note, the trig's included, is N.LEN long. */
+#define A_STEP_LEN  0x0c0                   /* s8[64]: a step's LEN, -1 the track's */
+#define A_TRK_LEN   0x381                   /* s8: the track's LEN */
+#define A_INF       0xffffu
+#define MAXHELD     8                       /* notes held at once (keys) */
+#define MAXARP      (MAXHELD * 4)           /* times 4 octaves */
+
+/* The keyboard (0.4): the keys held on an audio track in keyboard mode (FUNC +
+ * TRK), as kbsites.s hands them over (UI task). A key's note is held while it
+ * is (HOLD: until a key goes down with none held, which starts a new set).
+ * While they hold notes they play the arp, in place of the track's trigs. */
+struct live {
+    signed char note[MAXHELD];  /* as played */
+    unsigned char key[MAXHELD]; /* the trig key (0-15) each came from */
+    volatile unsigned char n;   /* notes held */
+    unsigned char vel;
+    unsigned short down;        /* the keys down now, bit k: key k */
+};
+static struct live live[SQ_AUDIO];
+
+struct parp {
+    unsigned char active;       /* a note is held */
+    unsigned char live;         /* the keyboard plays it (struct live) */
+    unsigned char thru;         /* live recording, no key held: the step plays as stored */
+    unsigned char srcp;         /* this step has a note trig (it may start the arp) */
+    unsigned char capvel;       /* the trig's velocity is the arp's: take it */
+    unsigned char fire;         /* this step fires */
+    unsigned char nheld;        /* the notes held, 1-SQ_NOTES */
+    unsigned char vel;
+    unsigned char p;            /* where the arp is in MODE's cycle */
+    unsigned char rep;          /* RPT: the plays of this note so far */
+    unsigned char oidx;         /* the offset step */
+    signed char walk;           /* WALK so far */
+    unsigned short elapsed;     /* steps since the trig */
+    unsigned short units;       /* how long it is held, in 1/16 steps (A_INF: on) */
+    signed char held[MAXHELD];  /* the notes, low to high */
+    signed char order[MAXHELD]; /* as played */
+    unsigned char perm[MAXARP]; /* SHUF's order this cycle */
+};
+static struct parp parp[TRACKS];
+volatile unsigned char digiseq_aoff[TRACKS];        /* for the screen: the offset step */
+
+static int aclamp(int n)
+{
+    return n < 0 ? 0 : n > 127 ? 127 : n;
+}
+
+/* LEN, as the TRIG page's index, in 1/16 steps (see len_for_halves); 127 is INF */
+static unsigned units_for_len(int l)
+{
+    if (l < 0 || l >= 127) return A_INF;
+    if (l <= 30)  return (unsigned)(l + 2);
+    if (l <= 46)  return 32u + (unsigned)(l - 30) * 2u;
+    if (l <= 62)  return 64u + (unsigned)(l - 46) * 4u;
+    if (l <= 78)  return 128u + (unsigned)(l - 62) * 8u;
+    if (l <= 94)  return 256u + (unsigned)(l - 78) * 16u;
+    if (l <= 110) return 512u + (unsigned)(l - 94) * 32u;
+    return 1024u + (unsigned)(l - 110) * 64u;
+}
+
+static unsigned arp_units(int t, int step)
+{
+    uint8_t *pat = PATTERN, *trk;
+    int l;
+    if (!pat || step < 0 || step >= SQ_STEPS)
+        return 16;
+    trk = TRACK_OF(pat, t);
+    l = (signed char)trk[A_STEP_LEN + step];
+    if (l < 0)
+        l = (signed char)trk[A_TRK_LEN];
+    return units_for_len(l);
+}
+
+static void arp_reset(struct parp *a)
+{
+    a->active = a->live = a->thru = a->srcp = a->capvel = a->fire = 0;
+}
+
+/* ---- live recording (0.5) ----
+ * The keyboard's controller (kbsites.s hands it over with each key) keeps the
+ * sequencer's state at +152; that state's +353 is set while REC is lit and
+ * +361 while it records live (REC + PLAY; measured in digiemu on OS 1.53, the
+ * same offsets read by the same getters in 1.54). While an ARP track records
+ * live, each note the keys' arp plays is written on its step as a note trig
+ * (note lock, velocity, N.LEN, no micro timing or condition), over what was
+ * there; the steps it does not play are left as they were. With no key held,
+ * the track's trigs play as stored (no arp), so what was recorded sounds as
+ * it will. When the recording stops, TYPE goes to OFF on the tracks it
+ * recorded (digiseq_tick). */
+#define KB_SEQ        152
+#define SEQ_REC       353
+#define SEQ_LIVE      361
+#define A_W_TRIG      0x0001
+#define A_W_SYN       0x0080
+#define A_W_SYN_SET   0x0800
+#define A_VEL         0x080
+#define A_MICRO       0x100
+#define A_COND        0x200
+#define A_NOTE_LOCK   0x280
+#define A_DEF_TRIGS   0x382
+static uint8_t *volatile kb_obj;
+static volatile uint16_t arp_recorded;      /* tracks the recording wrote to */
+
+static int rec_live(void)
+{
+    uint32_t o = (uint32_t)kb_obj, s;
+    if (!o || o < 0x40000000u || o >= 0x48000000u || TRANSPORT != 1)
+        return 0;
+    s = *(volatile uint32_t *)(o + KB_SEQ);
+    if (s < 0x40000000u || s >= 0x48000000u)
+        return 0;
+    return ((volatile uint8_t *)s)[SEQ_REC] && ((volatile uint8_t *)s)[SEQ_LIVE];
+}
+
+static void arp_record(int t, int step, int note, int vel, int len)
+{
+    uint8_t *pat = PATTERN, *trk;
+    unsigned w;
+    if (!pat || step < 0 || step >= SQ_STEPS)
+        return;
+    trk = TRACK_OF(pat, t);
+    w = (unsigned)(trk[2 * step] << 8 | trk[2 * step + 1]);
+    w |= A_W_TRIG;
+    if (!((w & A_W_SYN_SET) ? (w & A_W_SYN) : (trk[A_DEF_TRIGS + 1] & A_W_SYN)))
+        w |= A_W_SYN_SET | A_W_SYN;         /* a note trig, whatever the default */
+    trk[A_NOTE_LOCK + step] = (uint8_t)note;
+    trk[A_VEL + step] = (uint8_t)vel;
+    trk[A_STEP_LEN + step] = (uint8_t)len;  /* 255: the track's */
+    trk[A_MICRO + step] = 0;
+    trk[A_COND + step] = 0xff;
+    trk[2 * step] = (uint8_t)(w >> 8);
+    trk[2 * step + 1] = (uint8_t)w;
+    arp_recorded |= (uint16_t)(1u << t);
+}
+
+/* The notes held from a list, as played: held low to high */
+static void arp_hold(struct parp *a, const signed char *notes, int n)
+{
+    int i, j;
+    signed char x;
+    if (n > MAXHELD)
+        n = MAXHELD;
+    for (i = 0; i < n; i++)
+        a->order[i] = a->held[i] = notes[i];
+    for (i = 1; i < n; i++)
+        for (j = i; j > 0 && a->held[j - 1] > a->held[j]; j--) {
+            x = a->held[j];
+            a->held[j] = a->held[j - 1];
+            a->held[j - 1] = x;
+        }
+    a->nheld = (unsigned char)n;
+}
+
+static int arp_period(int mode, int m)
+{
+    switch (mode) {
+    case AM_UPDN:  return m < 2 ? 1 : 2 * m - 2;
+    case AM_UPDN2: return 2 * m;
+    case AM_PINKY:
+    case AM_THUMB: return m < 2 ? 1 : 2 * (m - 1);
+    default:       return m;
+    }
+}
+
+static int conv_index(int p, int m)
+{
+    int k = p / 2;
+    return (p & 1) ? m - 1 - k : k;
+}
+
+static int arp_index(struct parp *a, int mode, int p, int m)
+{
+    switch (mode) {
+    case AM_DOWN:  return m - 1 - p;
+    case AM_UPDN:  return p < m ? p : 2 * m - 2 - p;
+    case AM_UPDN2: return p < m ? p : 2 * m - 1 - p;
+    case AM_CONV:  return conv_index(p, m);
+    case AM_DIV:   return conv_index(m - 1 - p, m);
+    case AM_PINKY: return m < 2 ? 0 : (p & 1) ? m - 1 : p / 2;
+    case AM_THUMB: return m < 2 ? 0 : (p & 1) ? p / 2 + 1 : 0;
+    case AM_RAND:  return (int)(xorshift(&irq_rand) % (unsigned long)m);
+    case AM_SHUF:  return a->perm[p % MAXARP];
+    default:       return p;                /* UP, ORDER */
+    }
+}
+
+static void arp_shuffle(struct parp *a, int m)
+{
+    int i, j;
+    unsigned char x;
+    for (i = 0; i < m; i++)
+        a->perm[i] = (unsigned char)i;
+    for (i = m - 1; i > 0; i--) {
+        j = (int)(xorshift(&irq_rand) % (unsigned long)(i + 1));
+        x = a->perm[i];
+        a->perm[i] = a->perm[j];
+        a->perm[j] = x;
+    }
+}
+
+/* A note trig that plays: the arp starts with its notes */
+static void arp_start(int t, int step, const int8_t notes[SQ_NOTES])
+{
+    struct parp *a = &parp[t];
+    signed char got[SQ_NOTES];
+    int n = 0, i, v;
+    if (notes[0] < 0)
+        return;
+    got[n++] = notes[0];
+    if (t >= SQ_AUDIO)                      /* a MIDI track's chord */
+        for (i = 1; i < SQ_NOTES; i++)
+            if (notes[i] && (v = notes[0] + notes[i]) >= 0 && v <= 127)
+                got[n++] = (signed char)v;
+    arp_hold(a, got, n);
+    a->active = 1;
+    a->capvel = 1;
+    a->elapsed = 0;
+    a->units = (unsigned short)arp_units(t, step);
+    a->p = a->rep = a->oidx = 0;
+    a->walk = 0;
+}
+
+/* The arp's next note */
+static int arp_next(int t)
+{
+    struct parp *a = &parp[t];
+    const struct arpset *s = &digiseq_arp[t];
+    int n = a->nheld, rng = s->set[A_RNG], mode = s->set[A_MODE], rpt = s->set[A_RPT];
+    int m, period, idx, len = s->len, note;
+    const signed char *list;
+    if (n < 1 || n > MAXHELD)
+        return -1;
+    if (rng < 1 || rng > 4) rng = 1;
+    if (mode >= AMODES) mode = AM_UP;
+    if (rpt < 1 || rpt > 4) rpt = 1;
+    if (len < 1 || len > OFFS) len = OFFS;
+    m = n * rng;
+    period = arp_period(mode, m);
+    if (a->p >= period)
+        a->p = 0;
+    if (mode == AM_SHUF && a->p == 0 && a->rep == 0)
+        arp_shuffle(a, m);
+    idx = arp_index(a, mode, a->p, m);
+    if (idx < 0 || idx >= m)
+        idx = 0;
+    if (a->oidx >= len)
+        a->oidx = 0;
+    list = mode == AM_ORDER ? a->order : a->held;
+    note = list[idx % n] + 12 * (idx / n) + s->off[a->oidx] + a->walk;
+    digiseq_aoff[t] = a->oidx;
+    if (++a->rep >= rpt) {
+        a->rep = 0;
+        a->oidx = (unsigned char)((a->oidx + 1) % len);
+        if (++a->p >= period) {
+            int w = a->walk + (s->set[A_WALK] - WALK_MAX);
+            a->p = 0;
+            a->walk = (signed char)(w > WALK_WRAP || w < -WALK_WRAP ? 0 : w);
+        }
+    }
+    return aclamp(note);
+}
+
+static void arp_trig(int32_t track, int32_t first, uint32_t *trig)
+{
+    struct parp *a = &parp[track];
+    if (!first && a->thru)
+        return;
+    if (first) {
+        const struct arpset *s = &digiseq_arp[track];
+        int spd = spd_steps[s->set[A_SPD] < SPDS ? s->set[A_SPD] : 0];
+        if (TRANSPORT == 0) {               /* stopped: the first step, from nothing */
+            arp_reset(a);
+            prep[track] = 1;
+            rewind[track] = 0;
+        } else if (prep[track]) {
+            prep[track] = rewind[track] = 0;
+        } else if (rewind[track]) {
+            rewind[track] = 0;
+            arp_reset(a);
+        }
+        reset_req[track] = 0;
+        a->thru = 0;
+        if (track < SQ_AUDIO && live[track].n) {    /* the keyboard plays it */
+            if (!a->live) {                 /* from its first note, on this step */
+                a->live = a->active = 1;
+                a->capvel = 0;
+                a->elapsed = 0;
+                a->p = a->rep = a->oidx = 0;
+                a->walk = 0;
+            } else if (a->elapsed < 0xfffe) {
+                a->elapsed++;
+            }
+            a->srcp = 0;                    /* the track's trigs wait */
+            a->fire = (unsigned char)(a->elapsed % spd == 0);
+            goto out;
+        }
+        if (a->live)                        /* the keys let go */
+            a->live = a->active = 0;
+        a->thru = (unsigned char)rec_live();
+        if (a->thru) {                      /* recording, no key: the trigs as stored */
+            a->active = a->srcp = a->fire = 0;
+            return;
+        }
+        if (a->active) {
+            if (a->elapsed < 0xfffe)
+                a->elapsed++;
+            if (!s->set[A_HOLD] && a->units != A_INF && (unsigned long)a->elapsed * 16 >= a->units)
+                a->active = 0;              /* the note is let go */
+        }
+        a->srcp = (unsigned char)((*trig & SQ_TRIG) != 0);
+        a->fire = (unsigned char)(a->srcp || (a->active && a->elapsed % spd == 0));
+    }
+out:
+    if (a->fire)
+        *trig |= SQ_TRIG;
+    else
+        *trig &= ~SQ_TRIG;
+}
+
 /* Both reads of a step (first 1, then 0) must answer the same: the first
  * moves the sequence, the second reuses where it is. */
 void digiseq_trig(int32_t track, int32_t step, int32_t first, uint32_t *trig)
@@ -573,6 +966,10 @@ void digiseq_trig(int32_t track, int32_t step, int32_t first, uint32_t *trig)
     int fire;
     if (!data_ready || (uint32_t)track >= TRACKS || !digiseq_trk[track].on)
         return;
+    if (digiseq_trk[track].eng == E_ARP) {
+        arp_trig(track, first, trig);
+        return;
+    }
     if (first) {
         if (TRANSPORT == 0) {            /* stopped: prepare the first step */
             prep[track] = 1;
@@ -644,10 +1041,42 @@ void digiseq_notes(int32_t track, int32_t step, int32_t generated, int8_t notes[
 {
     struct sq_track info;
     int base, root = 0, n, i;
-    (void)step;
     (void)generated;
     if (!data_ready || (uint32_t)track >= TRACKS || !digiseq_trk[track].on)
         return;
+    if (digiseq_trk[track].eng == E_ARP) {
+        struct parp *a = &parp[track];
+        if (a->thru)                        /* recording, no key: as stored */
+            return;
+        if (a->live) {                      /* the keys held now, as they are */
+            const struct live *L = &live[track];
+            signed char got[MAXHELD];
+            int k = L->n;
+            if (k > MAXHELD)
+                k = MAXHELD;
+            for (i = 0; i < k; i++)
+                got[i] = L->note[i];
+            if (k)
+                arp_hold(a, got, k);
+        } else if (a->srcp) {               /* the note trig plays: the arp starts */
+            a->srcp = 0;
+            arp_start(track, step, notes);
+        }
+        if (!a->active)
+            return;
+        n = arp_next(track);
+        if (n < 0)
+            return;
+        notes[0] = (int8_t)n;
+        if (a->live && rec_live()) {        /* recording live: onto its step */
+            int nl = digiseq_arp[track].set[A_NLEN];
+            arp_record(track, step, n, live[track].vel ? live[track].vel : 100,
+                       nl > 0 && nl < ANLENS ? len_for_halves(anlen_halves[nl]) : 255);
+        }
+        for (i = 1; i < SQ_NOTES; i++)
+            notes[i] = 0;
+        return;
+    }
     if (sq_track_info(track, &info, sizeof info) == 0)
         base = info.note;
     else
@@ -668,7 +1097,20 @@ void digiseq_notes(int32_t track, int32_t step, int32_t generated, int8_t notes[
 void digiseq_vel(int32_t track, int32_t step, int32_t *vel)
 {
     (void)step;
-    if (eng_on(track, E_185))
+    if (eng_on(track, E_ARP)) {
+        struct parp *a = &parp[track];
+        if (a->thru)
+            return;
+        if (a->live) {                      /* the keyboard's velocity */
+            if (track < SQ_AUDIO && live[track].vel)
+                *vel = live[track].vel;
+        } else if (a->capvel) {             /* the trig's: the arp's notes play it */
+            a->capvel = 0;
+            a->vel = (unsigned char)(*vel < 1 ? 1 : *vel > 127 ? 127 : *vel);
+        } else if (a->active) {
+            *vel = a->vel;
+        }
+    } else if (eng_on(track, E_185))
         *vel = digiseq_trk[track].st.vel[p185[track].stage];
     else if (eng_on(track, E_SNAKE))
         *vel = digiseq_snake[track].vel[play[track].cell];
@@ -679,8 +1121,11 @@ void digiseq_vel(int32_t track, int32_t step, int32_t *vel)
 void digiseq_cond(int32_t track, int32_t step, int32_t *pass)
 {
     (void)step;
-    if (data_ready && (uint32_t)track < TRACKS && digiseq_trk[track].on)
+    if (data_ready && (uint32_t)track < TRACKS && digiseq_trk[track].on) {
+        if (digiseq_trk[track].eng == E_ARP && (parp[track].srcp || parp[track].thru))
+            return;                         /* ARP: a note trig's own condition decides */
         *pass = 1;
+    }
 }
 
 /* 185: a HOLD's note lasts its stage; LEN (SETUP) sets the others' (TRK:
@@ -692,6 +1137,16 @@ void digiseq_len(int32_t track, int32_t step, int32_t *len)
     const struct play185 *p;
     const struct stages *g;
     (void)step;
+    if (eng_on(track, E_ARP)) {             /* N.LEN, the trig's note included */
+        int nl = digiseq_arp[track].set[A_NLEN];
+        if (parp[track].thru)
+            return;
+        if (nl > 0 && nl < ANLENS)
+            *len = len_for_halves(anlen_halves[nl]);
+        else if (PATTERN)
+            *len = (signed char)TRACK_OF(PATTERN, track)[A_TRK_LEN];
+        return;
+    }
     if (!eng_on(track, E_185))
         return;
     p = &p185[track];
@@ -702,6 +1157,94 @@ void digiseq_len(int32_t track, int32_t step, int32_t *len)
         *len = len_for_halves(nlen_halves[g->set[S_NLEN]]);
     else if (PATTERN)                    /* TRK: the track's LEN, not a step's own */
         *len = (signed char)TRACK_OF(PATTERN, track)[TR_LEN_OFF_TRACK];
+}
+
+/* ==== the keyboard (kbsites.s) ==========================================
+ * UI task. A key down on an audio track whose TYPE is ARP: its note joins the
+ * notes held (with HOLD on and no key down, a new set starts). Playing, the arp
+ * plays it and the stock note does not (-> 1); stopped, the stock note plays as
+ * ever and the key is still held, so a HOLD set waits for PLAY. */
+static int arp_kb_track(int t)
+{
+    return t >= 0 && t < SQ_AUDIO && digiseq_trk[t].on && digiseq_trk[t].eng == E_ARP;
+}
+
+static void live_drop(struct live *L, int i)
+{
+    int j, n = L->n;
+    for (j = i; j + 1 < n; j++) {
+        L->note[j] = L->note[j + 1];
+        L->key[j] = L->key[j + 1];
+    }
+    L->n = (unsigned char)(n - 1);          /* last: the fire reads n notes */
+}
+
+int digiseq_kb_on(void *obj, int32_t key, int32_t track, int32_t note, int32_t vel)
+{
+    struct live *L;
+    int i;
+    kb_obj = (uint8_t *)obj;                /* the sequencer's state: live recording */
+    if (!data_ready || key < 0 || key > 15 || note < 0 || note > 127 || !arp_kb_track(track))
+        return 0;
+    L = &live[track];
+    if (digiseq_arp[track].set[A_HOLD] && !L->down)
+        L->n = 0;                           /* HOLD: a new set */
+    L->down |= (unsigned short)(1u << key);
+    for (i = 0; i < L->n && L->key[i] != key; i++)
+        ;
+    if (i < L->n) {
+        L->note[i] = (signed char)note;     /* the key again (HOLD): its new note */
+    } else {
+        if (L->n >= MAXHELD)
+            live_drop(L, 0);                /* full: the oldest goes */
+        L->note[L->n] = (signed char)note;
+        L->key[L->n] = (unsigned char)key;
+        L->n = (unsigned char)(L->n + 1);
+    }
+    L->vel = (unsigned char)(vel < 1 ? 1 : vel > 127 ? 127 : vel);
+    redraw = 1;
+    return TRANSPORT == 1;
+}
+
+void digiseq_kb_off(int32_t key)
+{
+    int t, i;
+    if (key < 0 || key > 15)
+        return;
+    for (t = 0; t < SQ_AUDIO; t++) {
+        struct live *L = &live[t];
+        if (!(L->down & (1u << key)))
+            continue;
+        L->down &= (unsigned short)~(1u << key);
+        if (!digiseq_arp[t].set[A_HOLD])
+            for (i = 0; i < L->n; i++)
+                if (L->key[i] == key) {
+                    live_drop(L, i);
+                    break;
+                }
+        redraw = 1;
+    }
+}
+
+/* each UI frame: a track no longer ARP holds nothing; HOLD off lets go of
+ * the keys no longer down */
+static void live_tidy(void)
+{
+    int t, i;
+    for (t = 0; t < SQ_AUDIO; t++) {
+        struct live *L = &live[t];
+        if (!L->n && !L->down)
+            continue;
+        if (!arp_kb_track(t)) {
+            L->n = 0;
+            L->down = 0;
+            continue;
+        }
+        if (!digiseq_arp[t].set[A_HOLD])
+            for (i = L->n - 1; i >= 0; i--)
+                if (!(L->down & (1u << L->key[i])))
+                    live_drop(L, i);
+    }
 }
 
 /* ==== 2X: the track's own speed =========================================
@@ -741,8 +1284,9 @@ static void speed_sync(void)
     for (t = 0; t < TRACKS; t++) {
         const struct track *k = &digiseq_trk[t];
         int eng = k->eng;
-        int want = pt && k->on &&
-                   (eng == E_185 ? k->st.set[S_CLOCK] == 0 : digiseq_snake[t].set[P_DIV] == 0);
+        int want = pt && k->on &&                   /* ARP: never 2X */
+                   (eng == E_185 ? k->st.set[S_CLOCK] == 0 :
+                    eng == E_SNAKE ? digiseq_snake[t].set[P_DIV] == 0 : 0);
         if (mod_pat[t] && (mod_pat[t] != pat || !want || mod_eng[t] != eng)) {     /* put it back */
             uint8_t *tr = TRACK_OF(mod_pat[t], t);
             if ((signed char)tr[TR_SPEED] == speed_half(mod_orig[t]))
@@ -957,9 +1501,13 @@ static const char *const snake_pages[SNAKE_PAGES] = { "NOTES", "GATES", "VELOCIT
 static const char *const pages185[PAGES_185] = { "PITCH", "VELOCITY", "PULSES", "MODE", "DIV", "SETUP" };
 static const char *const snake_what[SNAKE_PAGES] = { "NOTES", "GATES", "VELOCITY", "PATH" };
 static const char *const what185[PAGES_185] = { "PITCH", "VELOCITY", "PULSES", "MODES", "DIVISIONS", "SETUP" };
+enum { PGA_OFFS, PGA_ARP, ARP_PAGES };
+static const char *const arp_pages[ARP_PAGES] = { "OFFSETS", "ARP" };
 
 unsigned char digiseq_open;                         /* the page is up */
 unsigned char digiseq_pg_snake, digiseq_pg_185;     /* the page shown, per type */
+unsigned char digiseq_pg_arp;
+static unsigned char arp_sel[TRACKS];               /* OFFSETS: the step selected (its half on knobs) */
 void *digiseq_brain;
 static unsigned char trig_held, trig_used, stock_held, stock_used;
 static unsigned char func_held, trk_held;
@@ -975,17 +1523,18 @@ static int ui_track(void)
 
 static int eng_of(int t)
 {
-    return digiseq_trk[t].eng == E_185 ? E_185 : E_SNAKE;
+    int e = digiseq_trk[t].eng;
+    return e == E_185 || e == E_ARP ? e : E_SNAKE;
 }
 
 static unsigned char *pg_of(int eng)
 {
-    return eng == E_185 ? &digiseq_pg_185 : &digiseq_pg_snake;
+    return eng == E_185 ? &digiseq_pg_185 : eng == E_ARP ? &digiseq_pg_arp : &digiseq_pg_snake;
 }
 
 static int pages_of(int eng)
 {
-    return eng == E_185 ? PAGES_185 : SNAKE_PAGES;
+    return eng == E_185 ? PAGES_185 : eng == E_ARP ? ARP_PAGES : SNAKE_PAGES;
 }
 
 static int last_page(int eng)
@@ -1015,6 +1564,8 @@ static void set_type(int t, int ty)
         k->on = 1;
     }
     digiseq_snake[t].set[P_ON] = (unsigned char)(k->on && k->eng == E_SNAKE);
+    if (k->on && k->eng == E_ARP)
+        arp_reset(&parp[t]);                /* nothing held until the next note trig */
     reset_req[t] = 1;
 }
 
@@ -1226,11 +1777,71 @@ static void st_paste(struct stages *g, const struct stages *from, int pg)
             g->set[c] = from->set[c];
 }
 
+/* ---- ARP's page edits ---- */
+static void arp_randomise(struct arpset *a, int pg)
+{
+    int c;
+    if (pg == PGA_OFFS) {                   /* mostly roots, octaves and fifths */
+        static const signed char pick[16] = { 0, 0, 0, 0, 12, 12, -12, 7, 7, 5, 3, 10, -5, 24, 2, -7 };
+        for (c = 0; c < OFFS; c++)
+            a->off[c] = pick[(xorshift(&ui_rand) >> 7) & 15];
+        a->len = (unsigned char)(2 + xorshift(&ui_rand) % (OFFS - 1));
+    } else {                                /* MODE, SPD, RNG, RPT, WALK */
+        static const unsigned char spd[8] = { 0, 0, 0, 0, 1, 1, 2, 3 };
+        static const unsigned char rpt[8] = { 1, 1, 1, 1, 1, 2, 2, 3 };
+        static const signed char walk[8] = { 0, 0, 0, 0, 1, -1, 2, 5 };
+        a->set[A_MODE] = (unsigned char)(xorshift(&ui_rand) % AMODES);
+        a->set[A_SPD] = spd[xorshift(&ui_rand) & 7];
+        a->set[A_RNG] = (unsigned char)(1 + xorshift(&ui_rand) % 3);
+        a->set[A_RPT] = rpt[xorshift(&ui_rand) & 7];
+        a->set[A_WALK] = (unsigned char)(WALK_MAX + walk[xorshift(&ui_rand) & 7]);
+    }
+}
+
+static void arp_clear(struct arpset *a, int pg)
+{
+    struct arpset d;
+    int c;
+    arp_defaults(&d);
+    if (pg == PGA_OFFS) {
+        for (c = 0; c < OFFS; c++)
+            a->off[c] = 0;
+        a->len = d.len;
+    } else {
+        for (c = 1; c < NASETS; c++)
+            a->set[c] = d.set[c];
+    }
+}
+
+static void arp_nudge(struct arpset *a, int pg, int d, int func)
+{
+    int c;
+    if (pg != PGA_OFFS)
+        return;
+    for (c = 0; c < OFFS; c++)
+        a->off[c] = (signed char)clampi(a->off[c] + d * (func ? 12 : 1), -OFF_MAX, OFF_MAX);
+}
+
+static void arp_paste(struct arpset *a, const struct arpset *from, int pg)
+{
+    int c;
+    if (pg == PGA_OFFS) {
+        for (c = 0; c < OFFS; c++)
+            a->off[c] = from->off[c];
+        a->len = from->len;
+    } else {
+        for (c = 1; c < NASETS; c++)
+            a->set[c] = from->set[c];
+    }
+}
+
 /* ---- shared page actions ---- */
 static void page_randomise(int t, int pg)
 {
     ui_rand ^= frames;
-    if (eng_of(t) == E_185)
+    if (eng_of(t) == E_ARP)
+        arp_randomise(&digiseq_arp[t], pg);
+    else if (eng_of(t) == E_185)
         st_randomise(&digiseq_trk[t].st, pg);
     else
         snake_randomise(&digiseq_snake[t], pg);
@@ -1239,7 +1850,11 @@ static void page_randomise(int t, int pg)
 static void randomise_all(int t)
 {
     ui_rand ^= frames;
-    if (eng_of(t) == E_185) {
+    if (eng_of(t) == E_ARP) {               /* the offsets and MODE */
+        struct arpset *a = &digiseq_arp[t];
+        arp_randomise(a, PGA_OFFS);
+        a->set[A_MODE] = (unsigned char)(xorshift(&ui_rand) % AMODES);
+    } else if (eng_of(t) == E_185) {
         st_randomise(&digiseq_trk[t].st, PG8_PITCH);
         st_randomise(&digiseq_trk[t].st, PG8_VEL);
         st_randomise(&digiseq_trk[t].st, PG8_PULSES);
@@ -1253,7 +1868,8 @@ static void randomise_all(int t)
 
 static const char *what_of(int eng, int pg)
 {
-    return eng == E_185 ? what185[pg % PAGES_185] : snake_what[pg % SNAKE_PAGES];
+    return eng == E_185 ? what185[pg % PAGES_185] : eng == E_ARP ? arp_pages[pg % ARP_PAGES]
+                                                             : snake_what[pg % SNAKE_PAGES];
 }
 
 /* COPY / PASTE: one page, from any track to any other of the same type */
@@ -1346,7 +1962,9 @@ static int page_key(int t, unsigned long key, unsigned long flags)
         return key == KEY_LEFT || key == KEY_RIGHT || key == KEY_UP || key == KEY_DOWN
             || key == KEY_YES || key == KEY_NO
             || (key >= KEY_STEP1 && key < KEY_STEP1 + CELLS && !trk_held &&
-                ((eng == E_SNAKE && pg == PG_GATES) || (eng == E_185 && pg == PG8_MODE)));
+                ((eng == E_SNAKE && pg == PG_GATES) || (eng == E_185 && pg == PG8_MODE)))
+            || (key >= KEY_STEP1 && key < KEY_STEP1 + OFFS && !trk_held &&
+                eng == E_ARP && pg == PGA_OFFS);
 
     if (key == KEY_YES && func) {                       /* randomise the note pages */
         trig_used = 1;
@@ -1355,7 +1973,7 @@ static int page_key(int t, unsigned long key, unsigned long flags)
             run_valid[t] = run_active[t] = 1;
         }
         randomise_all(t);
-        POPUP("%s RANDOMISED", eng == E_185 ? "STAGES" : "SNAKE");
+        POPUP("%s RANDOMISED", eng == E_185 ? "STAGES" : eng == E_ARP ? "ARP" : "SNAKE");
         return 1;
     }
     if (key == KEY_NO && trig_held) {
@@ -1372,7 +1990,7 @@ static int page_key(int t, unsigned long key, unsigned long flags)
         return 1;
     }
     if ((key == KEY_UP || key == KEY_DOWN) && trig_held) {     /* TYPE */
-        int ty = (type_of(t) + (key == KEY_UP ? 1 : 2)) % 3;
+        int ty = (type_of(t) + (key == KEY_UP ? 1 : NTYPES - 1)) % NTYPES;
         trig_used = 1;
         set_type(t, ty);
         edited(t);
@@ -1391,6 +2009,10 @@ static int page_key(int t, unsigned long key, unsigned long flags)
     if (key == KEY_REC && trig_held && func) {                               /* PRINT */
         int n;
         trig_used = 1;
+        if (eng == E_ARP) {                 /* record it live instead */
+            POPUP("PRINT N/A FOR ARP");
+            return 1;
+        }
         n = print_track(t);
         if (n < 0) {
             POPUP("NO PATTERN TO PRINT TO");
@@ -1420,7 +2042,9 @@ static int page_key(int t, unsigned long key, unsigned long flags)
             return 1;
         }
         *pgp = (unsigned char)clip_pg;
-        if (eng == E_185)
+        if (eng == E_ARP)
+            arp_paste(&digiseq_arp[t], &clip.a, clip_pg);
+        else if (eng == E_185)
             st_paste(&digiseq_trk[t].st, &clip.k.st, clip_pg);
         else
             snake_paste(&digiseq_snake[t], &clip.s, clip_pg);
@@ -1431,7 +2055,9 @@ static int page_key(int t, unsigned long key, unsigned long flags)
     }
     if (key == KEY_PLAY && trig_held) {                                      /* CLEAR */
         trig_used = 1;
-        if (eng == E_185)
+        if (eng == E_ARP)
+            arp_clear(&digiseq_arp[t], pg);
+        else if (eng == E_185)
             st_clear(&digiseq_trk[t].st, pg);
         else
             snake_clear(&digiseq_snake[t], pg);
@@ -1449,11 +2075,27 @@ static int page_key(int t, unsigned long key, unsigned long flags)
         return 1;
     }
     if (key == KEY_UP || key == KEY_DOWN) {
-        if (eng == E_185)
+        if (eng == E_ARP)
+            arp_nudge(&digiseq_arp[t], pg, key == KEY_UP ? 1 : -1, func);
+        else if (eng == E_185)
             st_nudge(&digiseq_trk[t].st, pg, key == KEY_UP ? 1 : -1, func);
         else
             snake_nudge(&digiseq_snake[t], pg, key == KEY_UP ? 1 : -1, func);
         edited(t);
+        return 1;
+    }
+    if (!trk_held && eng == E_ARP && pg == PGA_OFFS && key >= KEY_STEP1 && key < KEY_STEP1 + OFFS) {
+        int c = (int)(key - KEY_STEP1);
+        struct arpset *a = &digiseq_arp[t];
+        if (func) {                         /* FUNC + trig key: LEN */
+            a->len = (unsigned char)(c + 1);
+            edited(t);
+            POPUP("LEN %d", c + 1);
+        } else {                            /* select: knobs A-H edit its half */
+            arp_sel[t] = (unsigned char)c;
+            POPUP("STEP %d %c%d", c + 1, a->off[c] < 0 ? '-' : '+',
+                  a->off[c] < 0 ? -a->off[c] : a->off[c]);
+        }
         return 1;
     }
     if (!trk_held && key >= KEY_STEP1 && key < KEY_STEP1 + CELLS) {
@@ -1547,7 +2189,7 @@ static void snake_enc(int t, struct snake *s, int pg, int c, long d)
         break;
     default:
         if (c == P_ON) {
-            int ty = clampi(type_of(t) + d, 0, 2);
+            int ty = clampi(type_of(t) + d, 0, NTYPES - 1);
             set_type(t, ty);
             POPUP("TYPE %s", type_names[ty]);
         } else if (func_held && c == P_RANGE) {
@@ -1599,7 +2241,7 @@ static void st_enc(int t, struct stages *g, int pg, int c, long d)
         break;
     default:
         if (c == S_TYPE) {
-            int ty = clampi(type_of(t) + d, 0, 2);
+            int ty = clampi(type_of(t) + d, 0, NTYPES - 1);
             set_type(t, ty);
             POPUP("TYPE %s", type_names[ty]);
         } else if (func_held && c == S_RANGE) {
@@ -1618,6 +2260,26 @@ static void st_enc(int t, struct stages *g, int pg, int c, long d)
             reset_req[t] = 1;
         break;
     }
+}
+
+static void arp_enc(int t, struct arpset *a, int pg, int c, long d)
+{
+    if (pg == PGA_OFFS) {                   /* knobs A-H: the selected step's half */
+        int s = (arp_sel[t] & 8) + c;
+        if (func_held)
+            a->off[s] = (signed char)next_stop(a->off[s], d, note_stops, 5);
+        else
+            a->off[s] = (signed char)clampi(a->off[s] + d, -OFF_MAX, OFF_MAX);
+        POPUP("STEP %d %c%d", s + 1, a->off[s] < 0 ? '-' : '+', a->off[s] < 0 ? -a->off[s] : a->off[s]);
+        return;
+    }
+    if (c == A_TYPE) {
+        int ty = clampi(type_of(t) + d, 0, NTYPES - 1);
+        set_type(t, ty);
+        POPUP("TYPE %s", type_names[ty]);
+        return;
+    }
+    a->set[c] = (unsigned char)clampi(a->set[c] + d, aset_min[c], aset_max[c]);
 }
 
 int digiseq_enc(void *brain, void *ev)
@@ -1642,7 +2304,9 @@ int digiseq_enc(void *brain, void *ev)
         pg = 0;
     redraw = 1;
     edited(t);
-    if (eng == E_185)
+    if (eng == E_ARP)
+        arp_enc(t, &digiseq_arp[t], pg, (int)e - 1, d);
+    else if (eng == E_185)
         st_enc(t, &digiseq_trk[t].st, pg, (int)e - 1, d);
     else
         snake_enc(t, &digiseq_snake[t], pg, (int)e - 1, d);
@@ -1673,6 +2337,21 @@ void digiseq_tick(void *ctrl)
     if (msg_ticks && !--msg_ticks)
         redraw = 1;
     speed_sync();
+    live_tidy();
+    {                                       /* a live recording ended: TYPE OFF */
+        static unsigned char was_rec;
+        int r = rec_live();
+        if (was_rec && !r && arp_recorded) {
+            uint16_t m = arp_recorded;
+            arp_recorded = 0;
+            for (t = 0; t < SQ_AUDIO; t++)
+                if ((m >> t) & 1 && digiseq_trk[t].on && digiseq_trk[t].eng == E_ARP) {
+                    set_type(t, 0);
+                    POPUP("T%d ARP RECORDED: TYPE OFF", t + 1);
+                }
+        }
+        was_rec = (unsigned char)r;
+    }
     if (digiseq_open) {
         /* a menu over the pages, or another view (a page key we passed on):
          * the page closes */
@@ -1681,7 +2360,9 @@ void digiseq_tick(void *ctrl)
         } else {
             static int last_pos = -1, last_play = -1, last_t = -1;
             int ut = ui_track(), playing = (int)TRANSPORT;
-            int pos = eng_of(ut) == E_185 ? digiseq_stage[ut] * 8 + digiseq_pulse[ut] : digiseq_cell[ut];
+            int e = eng_of(ut);
+            int pos = e == E_185 ? digiseq_stage[ut] * 8 + digiseq_pulse[ut]
+                    : e == E_ARP ? digiseq_aoff[ut] + 32 * parp[ut].active : digiseq_cell[ut];
             if (pos != last_pos || playing != last_play || ut != last_t) {
                 last_pos = pos;
                 last_play = playing;
@@ -1867,6 +2548,59 @@ static void draw_185(void *bmp, int t, int base, int root)
     TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", pages185[pg], pg + 1, PAGES_185);
 }
 
+/* ARP. OFFSETS: the 16 steps as bars from a centre line (+-24), the steps
+ * past LEN as dots, the knobs' half underlined, the step playing framed.
+ * ARP: the settings, a box a knob, as SETUP. */
+static void draw_arp(void *bmp, int t)
+{
+    const struct arpset *a = &digiseq_arp[t];
+    int pg = digiseq_pg_arp % ARP_PAGES, c;
+    if (pg == PGA_OFFS) {
+        int len = a->len < 1 || a->len > OFFS ? OFFS : a->len;
+        int half = arp_sel[t] & 8, mid = 31;
+        int cur = digiseq_trk[t].on && TRANSPORT == 1 && parp[t].active ? digiseq_aoff[t] : -1;
+        FILLRECT(bmp, 0, mid, 127, mid, 1);
+        for (c = 0; c < OFFS; c++) {
+            int x0 = 8 * c, v = a->off[c], h = (v * 20) / OFF_MAX;
+            if (c >= len) {
+                FILLRECT(bmp, x0 + 3, mid + 2, x0 + 4, mid + 2, 1);
+                continue;
+            }
+            if (h > 0)
+                FILLRECT(bmp, x0 + 2, mid, x0 + 5, mid + h, 1);
+            else if (h < 0)
+                FILLRECT(bmp, x0 + 2, mid + h, x0 + 5, mid, 1);
+            else
+                FILLRECT(bmp, x0 + 2, mid - 1, x0 + 5, mid + 1, 1);
+            if (c == cur)
+                FRAMERECT(bmp, x0, 9, x0 + 7, 53, 1);
+            if (c == arp_sel[t])
+                FILLRECT(bmp, x0 + 1, 52, x0 + 6, 52, 1);
+        }
+        FILLRECT(bmp, 64 * (half >> 3), 8, 64 * (half >> 3) + 63, 8, 1);   /* the knobs' half */
+        TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", arp_pages[pg], pg + 1, ARP_PAGES);
+        return;
+    }
+    for (c = 0; c < NASETS; c++) {
+        int x0 = 32 * (c & 3), y0 = (c < 4) ? 31 : 8;
+        int x1 = x0 + 30, y1 = y0 + 21, v = a->set[c];
+        FRAMERECT(bmp, x0, y0, x1, y1, 1);
+        TEXTF(bmp, FONT5, x0 + 3, y0 + 14, -1, "%s", aset_labels[c]);
+        switch (c) {
+        case A_TYPE: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", type_names[type_of(t)]); break;
+        case A_MODE: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", amode_names[v % AMODES]); break;
+        case A_SPD:  TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", spd_names[v % SPDS]); break;
+        case A_RNG:  TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%d OCT", v); break;
+        case A_NLEN: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", anlen_names[v % ANLENS]); break;
+        case A_RPT:  TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%dX", v); break;
+        case A_WALK: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%c%d", v < WALK_MAX ? '-' : '+',
+                           v < WALK_MAX ? WALK_MAX - v : v - WALK_MAX); break;
+        default:     TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", v ? "ON" : "OFF"); break;
+        }
+    }
+    TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", arp_pages[pg], pg + 1, ARP_PAGES);
+}
+
 void digiseq_draw(void *bmp, void *ctrl)
 {
     int t, base = 60, root;
@@ -1882,7 +2616,13 @@ void digiseq_draw(void *bmp, void *ctrl)
         base = info.note;
     root = base % 12;
     /* the title line: the track, its type, the page */
-    if (eng_of(t) == E_185) {
+    if (eng_of(t) == E_ARP) {
+        draw_arp(bmp, t);
+        if (t < SQ_AUDIO && live[t].n)          /* the keys held */
+            TEXTF(bmp, FONT5, 1, 57, -1, "T%d ARP KB%d", t + 1, live[t].n);
+        else
+            TEXTF(bmp, FONT5, 1, 57, -1, "%s%d ARP", t < SQ_AUDIO ? "T" : "MIDI ", (t & 7) + 1);
+    } else if (eng_of(t) == E_185) {
         draw_185(bmp, t, base, root);
         TEXTF(bmp, FONT5, 1, 57, -1, "%s%d 185 %dST", t < SQ_AUDIO ? "T" : "M", (t & 7) + 1,
               total_steps(&digiseq_trk[t].st));
@@ -1893,6 +2633,9 @@ void digiseq_draw(void *bmp, void *ctrl)
     FILLRECT(bmp, 0, 54, 127, 54, 1);
     if (msg_ticks && msgbuf[0])
         TEXTF(bmp, FONT5, 1, 1, -1, "%s", msgbuf);
+    else if (eng_of(t) == E_ARP && digiseq_pg_arp % ARP_PAGES == PGA_OFFS)
+        TEXTF(bmp, FONT5, 1, 1, -1, "LEN %d   KNOBS %d-%d", digiseq_arp[t].len,
+              (arp_sel[t] & 8) + 1, (arp_sel[t] & 8) + 8);
     else
         TEXTF(bmp, FONT5, 1, 1, -1, "TYPE %s  <> PAGE  TRIG BACK", type_names[type_of(t)]);
 }
