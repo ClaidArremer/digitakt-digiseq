@@ -1,11 +1,11 @@
 {
  "id": "digiseq-dt",
- "version": "0.8",
+ "version": "0.12",
  "title": "DIGISEQ",
  "category": "Sequencer",
- "license": "GPL-2.0-or-later",
+ "license": "GPL-3.0-or-later",
  "author": "Robbie",
- "description": "DIGISEQ for the Digitakt mk1: sequencer types a track plays in place of its own trigs, chosen per track (TYPE: OFF, SNAKE, 185 or ARP), on all 8 audio tracks (a note is the sample's pitch) and the 8 MIDI tracks. SNAKE: a Cartesian sequencer after MDD Snake (and Make Noise's Rene), eight cells in a 4 x 2 grid walked by a path (DIGISNAKE for Digitakt 0.2). 185: a stage sequencer after ML-185 (and RYK's M-185): eight stages, each with a pitch, a velocity, a length of 1-8 clock pulses and a mode (OFF, ONE, ALL every DIV pulses, HOLD for the whole stage), with DIR, STAGES, CLOCK (1/8 .. 2X), SCALE, RANGE, note LEN and SHIFT. ARP: an arpeggiator the track's own note trigs play: a trig's note (a MIDI track's chord) is held for its LEN (HOLD: until the next trig) and arpeggiated by MODE (UP, DOWN, UP-DN, UP+DN, CONV, DIV, PINKY, THUMB, ORDER, RAND, SHUF) over RNG octaves at SPD, through a 16-step offset sequence, with SCALE, RPT and WALK; in slice mode it arpeggiates slices. ARP also plays the keys held in keyboard mode (FUNC + TRK) on an audio track, HOLD latching them, while the sequencer plays; live recording (REC + PLAY) records the arp's notes into the track as trigs and sets TYPE to OFF when it stops. Press TRIG on the TRIG page to open it; hold TRIG + UP / DOWN changes TYPE, TRIG + YES randomises a page, FUNC + YES the note pages, TRIG + REC / STOP copy and paste, TRIG + PLAY clears, TRIG + FUNC + REC prints into the track (not ARP: record it live). Live recording (REC + PLAY) records what every type plays into the track and sets TYPE to OFF when it stops. Not saved with the project yet: print to keep. For OS 1.53 and 1.54; needs core 3.0 and seq-events 0.2 (ev_fire_len). Not with DIGISNAKE for Digitakt, which it replaces.",
+ "description": "DIGISEQ for the Digitakt mk1: sequencer types a track plays in place of its own trigs, chosen per track (TYPE: OFF, SNAKE, 185, ARP, EUCLID, TURING or GRIDS), on all 8 audio tracks (a note is the sample's pitch) and the 8 MIDI tracks. SNAKE: a Cartesian sequencer after MDD Snake (and Make Noise's Rene), eight cells in a 4 x 2 grid walked by a path (DIGISNAKE for Digitakt 0.2). 185: a stage sequencer after ML-185 (and RYK's M-185): eight stages, each with a pitch, a velocity, a length of 1-8 clock pulses and a mode (OFF, ONE, ALL every DIV pulses, HOLD for the whole stage), with DIR, STAGES, CLOCK (1/8 .. 2X), SCALE, RANGE, note LEN and SHIFT. ARP: an arpeggiator the track's own note trigs play: a trig's note (a MIDI track's chord) is held for its LEN (HOLD: until the next trig) and arpeggiated by MODE (UP, DOWN, UP-DN, UP+DN, CONV, DIV, PINKY, THUMB, ORDER, RAND, SHUF) over RNG octaves at SPD, through a 16-step offset sequence, with SCALE, RPT and WALK; in slice mode it arpeggiates slices. ARP also plays the keys held in keyboard mode (FUNC + TRK) on an audio track, HOLD latching them, while the sequencer plays; live recording (REC + PLAY) records the arp's notes into the track as trigs and sets TYPE to OFF when it stops. EUCLID (0.9): a Euclidean rhythm, HITS spread evenly over STEPS (1-16) and turned by ROT, playing NOTE at VEL, with ACC of its hits accented (spread evenly among them, turned by AROT) at AVL and ANOT, at CLOCK (1/8 .. 2X) with a note LEN; its page shows the pattern as a row of steps, a trig key sets STEPS and FUNC + a trig key HITS, UP / DOWN rotate it. TURING (0.10): after the Music Thing Turing Machine, a 16-bit shift register loops over its last LEN bits (2-16), each bit flipping by CHG as it comes round (0: a locked loop); the register plays notes over RANGE from NOTE in SCALE, steps by DENS and velocity by VEL and VSPR, at CLOCK with a note LEN; a trig key sets LEN, FUNC + a trig key flips that bit, UP / DOWN turn the loop. GRIDS (0.11): after Mutable Instruments Grids, the track plays one PART (BD, SD or HH) of its map of 32-step drum patterns at the place X, Y, with FILL for how many steps play, CHAOS, NOTE, VEL and AVL for the accents; each track has its own X and Y; trig keys 1-3 pick the part, UP / DOWN change FILL. Its map is Emilie Gillet's, from Mutable Instruments Grids (GPL-3.0-or-later). Press TRIG on the TRIG page to open it; hold TRIG + UP / DOWN changes TYPE, TRIG + YES randomises a page, FUNC + YES the note pages, TRIG + REC / STOP copy and paste, TRIG + PLAY clears, TRIG + FUNC + REC prints into the track (not ARP: record it live). Live recording (REC + PLAY) records what every type plays into the track and sets TYPE to OFF when it stops. Not saved with the project yet: print to keep. For OS 1.53 and 1.54; needs core 3.0 and seq-events 0.2 (ev_fire_len). Not with DIGISNAKE for Digitakt, which it replaces.",
  "device": "digitakt-mk1",
  "os": "1.53",
  "sources": [
@@ -16,6 +16,7 @@
   "-DDSQ_PATTERN_PP=0x4199dc38",
   "-DDSQ_TRANSPORT=0x4199dc2c",
   "-fno-tree-loop-distribute-patterns",
+    "-Os",
   "-DDSQ_POPUP=0x40093a6c"
  ],
  "ports": {
@@ -24,6 +25,7 @@
     "-DDSQ_PATTERN_PP=0x4199ec38",
     "-DDSQ_TRANSPORT=0x4199ec2c",
     "-fno-tree-loop-distribute-patterns",
+    "-Os",
     "-DDSQ_POPUP=0x40093ab0"
    ]
   }

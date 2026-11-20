@@ -117,9 +117,9 @@ static void sayf(const char *fmt, ...)
 }
 #define POPUP(...) sayf(__VA_ARGS__)
 
-enum { E_SNAKE = 1, E_185 = 2, E_ARP = 3 };
-#define NTYPES 4
-static const char *const type_names[NTYPES] = { "OFF", "SNAKE", "185", "ARP" };
+enum { E_SNAKE = 1, E_185 = 2, E_ARP = 3, E_EUC = 4, E_TUR = 5, E_GRD = 6 };
+#define NTYPES 7
+static const char *const type_names[NTYPES] = { "OFF", "SNAKE", "185", "ARP", "EUCLID", "TURING", "GRIDS" };
 
 /* ==== the project's data ================================================ */
 
@@ -137,7 +137,7 @@ struct snake digiseq_snake[TRACKS];
 /* 185 and the track's TYPE */
 enum { M_OFF, M_ONE, M_ALL, M_HOLD, MODES };
 static const char *const mode_names[MODES] = { "OFF", "ONE", "ALL", "HOLD" };
-enum { S_TYPE, S_DIR, S_STAGES, S_CLOCK, S_SCALE, S_RANGE, S_NLEN, S_SHIFT, NSETS };
+enum { S_TYPE, S_NLEN, S_DIR, S_STAGES, S_CLOCK, S_SCALE, S_RANGE, S_SHIFT, NSETS };   /* 0.12: SNAKE's knobs */
 struct stages {
     signed char pitch[CELLS];   /* semitones from NOTE */
     unsigned char vel[CELLS];   /* 1-127 */
@@ -156,17 +156,59 @@ struct track {
 };                              /* 64 bytes */
 struct track digiseq_trk[TRACKS];
 
-/* ARP: the ARP page's settings and the offset sequence */
-#define OFFS     16
-#define OFF_MAX  24
-enum { A_TYPE, A_MODE, A_SPD, A_RNG, A_SCALE, A_RPT, A_WALK, A_HOLD, NASETS };   /* SCALE: 0.7, in N.LEN's place */
+/* ARP: the ARP page's settings, on SNAKE's knobs (0.12) */
+enum { A_TYPE, A_HOLD, A_MODE, A_RPT, A_SPD, A_SCALE, A_RNG, A_INT, NASETS };
 struct arpset {
-    signed char off[OFFS];      /* semitones (slices) added, a step an arp note */
-    unsigned char set[NASETS];  /* set[A_TYPE] unused (struct track's); WALK + WALK_MAX */
-    unsigned char len;          /* the offsets played, 1-16 */
-    unsigned char pad[7];
-};                              /* 32 bytes */
+    unsigned char set[NASETS];  /* set[A_TYPE] unused (struct track's) */
+};                              /* 8 bytes */
 struct arpset digiseq_arp[TRACKS];
+
+/* EUCLID (0.9): HITS spread as evenly as they go over STEPS (1-16), turned
+ * by ROT; ACC of the hits accented (spread evenly among them, turned by
+ * AROT), at AVL and ANOT. A step a clock pulse (CLOCK). */
+#define EUC_MAX  16
+enum { U_STEPS, U_HITS, U_ROT, U_ACC, U_NOTE, U_VEL, U_AVL, U_AROT, NUSETS };   /* the EUCLID page */
+enum { V_TYPE, V_LEN, V_CHNC, V_GHST, V_CLOCK, V_ANOT, V_VSPR, V_SPIN, NVSETS };   /* SETUP, on SNAKE's knobs (0.12) */
+struct euclid {
+    unsigned char set[NUSETS];  /* U_NOTE: NOTE_MAX + semitones */
+    unsigned char setup[NVSETS];/* setup[V_TYPE] unused (struct track's); V_ANOT: NOTE_MAX + semitones */
+    unsigned char spd;          /* 2X: the speed to put back + 1 */
+};                              /* 17 bytes: the Digitakt keeps no project data, so no room kept */
+struct euclid digiseq_euc[TRACKS];
+
+/* TURING (0.10), after the Music Thing Turing Machine: a 16-bit register
+ * loops over its last LEN bits (2-16). Each clock pulse the bit coming round
+ * flips by CHG (0: a locked loop; 100: it doubles the loop, inverted) and goes
+ * back in at the start. Its bits 0-7 are the note (over RANGE semitones from
+ * NOTE, to SCALE), bits 4-11 whether the step plays (DENS) and bits 8-15 how
+ * far below VEL it plays (VSPR). It runs on through pattern starts. */
+enum { R_LEN, R_CHG, R_RANGE, R_SCALE, R_DENS, R_NOTE, R_VEL, R_VSPR, NRSETS };   /* the TURING page */
+struct turing {
+    uint16_t reg;               /* the register: bit 0 the newest */
+    unsigned char set[NRSETS];  /* R_NOTE: NOTE_MAX + semitones */
+    unsigned char setup[NVSETS];/* setup[V_TYPE] unused; V_CLOCK, V_LEN as EUCLID's */
+    unsigned char spd;          /* 2X: the speed to put back + 1 */
+};                              /* 19 bytes */
+struct turing digiseq_tur[TRACKS];
+#define TUR_RANGE_MAX 48
+
+/* GRIDS (0.11), after Mutable Instruments Grids: the track plays one PART
+ * (BD, SD or HH) of Grids' map of drum patterns, 32 steps long, at the place
+ * X, Y on the map; a step plays when its level there is above what FILL
+ * lets through, accented (AVL) when it is high; CHAOS adds a random amount
+ * to the levels, new each time round. Each track has its own X and Y. */
+#include "grids_map.h"
+#define GRD_STEPS 32
+#define GRD_PARTS 3
+enum { G_PART, G_X, G_Y, G_FILL, G_CHAOS, G_NOTE, G_VEL, G_AVL, NGSETS };     /* the GRIDS page */
+struct grids {
+    unsigned char set[NGSETS];  /* X, Y, FILL, CHAOS 0-127; G_NOTE: NOTE_MAX + semitones */
+    unsigned char setup[NVSETS];/* setup[V_TYPE] unused; V_CLOCK, V_LEN as EUCLID's */
+    unsigned char spd;          /* 2X: the speed to put back + 1 */
+};                              /* 17 bytes */
+struct grids digiseq_grd[TRACKS];
+static const char *const part_names[GRD_PARTS] = { "BD", "SD", "HH" };
+static const char *const part_long[GRD_PARTS] = { "Kick", "Snare", "Hat" };
 
 /* ==== shared tables ===================================================== */
 
@@ -198,13 +240,13 @@ static const char *const scale_names[SCALES] = {
 /* SNAKE's PATH page */
 static const unsigned char set_min[NSET] = { 0, 0, 0, 1, 0, 0, 1, 0 };
 static const unsigned char set_max[NSET] = { 1, SHAPES - 1, DIRS - 1, CELLS, 8, SCALES - 1, NOTE_MAX, CELLS - 1 };
-static const char *const set_labels[NSET] = { "TYPE", "SHAPE", "DIR", "LEN", "DIV", "SCALE", "RANGE", "SHIFT" };
+static const char *const set_labels[NSET] = { "TYPE", "SHAPE", "DIR", "STEPS", "CLOCK", "SCALE", "RANGE", "SHIFT" };
 
 /* 185's SETUP page */
 #define NLENS 5
-static const unsigned char sset_min[NSETS] = { 0, 0, 1, 0, 0, 1, 0, 0 };
-static const unsigned char sset_max[NSETS] = { 0, DIRS - 1, CELLS, 8, SCALES - 1, NOTE_MAX, NLENS - 1, CELLS - 1 };
-static const char *const sset_labels[NSETS] = { "TYPE", "DIR", "STAGES", "CLOCK", "SCALE", "RANGE", "LEN", "SHIFT" };
+static const unsigned char sset_min[NSETS] = { 0, 0, 0, 1, 0, 0, 1, 0 };
+static const unsigned char sset_max[NSETS] = { 0, NLENS - 1, DIRS - 1, CELLS, 8, SCALES - 1, NOTE_MAX, CELLS - 1 };
+static const char *const sset_labels[NSETS] = { "TYPE", "LEN", "DIR", "STAGES", "CLOCK", "SCALE", "RANGE", "SHIFT" };
 static const char *const nlen_names[NLENS] = { "TRK", "1/32", "1/16", "1/8", "1/4" };
 
 /* ARP's page. MODE: UP, DOWN, UP-DN (the ends once), UP+DN (the ends twice),
@@ -219,12 +261,35 @@ static const char *const amode_names[AMODES] = {
 };
 #define SPDS 6
 static const unsigned char spd_steps[SPDS] = { 1, 2, 3, 4, 8, 16 };
-static const char *const spd_names[SPDS] = { "1/16", "1/8", "3/16", "1/4", "1/2", "1/1" };
-#define WALK_MAX 12
-#define WALK_WRAP 48                        /* past +-48 the walk starts again from 0 */
-static const unsigned char aset_min[NASETS] = { 0, 0, 0, 1, 0, 1, 0, 0 };
-static const unsigned char aset_max[NASETS] = { 0, AMODES - 1, SPDS - 1, 4, SCALES - 1, 4, 2 * WALK_MAX, 1 };
-static const char *const aset_labels[NASETS] = { "TYPE", "MODE", "SPD", "RNG", "SCALE", "RPT", "WALK", "HOLD" };
+static const char *const spd_names[SPDS] = { "1X", "1/2", "1/3", "1/4", "1/8", "1/16" };   /* 0.12: as CLOCK, steps a note */
+/* RNG: how many copies of the notes, each INT semitones (slices) above the
+ * last: INT 12 (OCT) octaves, INT 1 the next slices of a chain */
+#define RNG_MAX 8
+#define INT_OCT 12
+static const unsigned char aset_min[NASETS] = { 0, 0, 0, 1, 0, 0, 1, 1 };
+static const unsigned char aset_max[NASETS] = { 0, 1, AMODES - 1, 4, SPDS - 1, SCALES - 1, RNG_MAX, INT_OCT };
+static const char *const aset_labels[NASETS] = { "TYPE", "HOLD", "MODE", "REPEAT", "CLOCK", "SCALE", "RANGE", "INTRVL" };
+
+/* EUCLID's pages */
+static const unsigned char uset_min[NUSETS] = { 1, 0, 0, 0, 0, 1, 1, 0 };
+static const unsigned char uset_max[NUSETS] = { EUC_MAX, EUC_MAX, EUC_MAX - 1, EUC_MAX, 2 * NOTE_MAX, 127, 127, EUC_MAX - 1 };
+static const char *const uset_labels[NUSETS] = { "STEPS", "HITS", "ROTATE", "ACCENT", "NOTE", "VEL", "A.VEL", "A.ROT" };
+static const char *const uset_long[NUSETS] = { "Steps", "Hits", "Rotate", "Accents", "Note", "Velocity",
+                                               "Accent Velocity", "Accent Rotate" };
+static const char *const vset_labels[NVSETS] = { "TYPE", "LEN", "CHANCE", "GHOST", "CLOCK", "A.NOTE", "SPREAD", "SPIN" };
+static const unsigned char vset_max[NVSETS] = { 0, NLENS - 1, 100, 127, 8, 2 * NOTE_MAX, 126, EUC_MAX - 1 };
+/* GRIDS' */
+static const unsigned char gset_min[NGSETS] = { 0, 0, 0, 0, 0, 0, 1, 1 };
+static const unsigned char gset_max[NGSETS] = { 2, 127, 127, 127, 127, 2 * NOTE_MAX, 127, 127 };
+static const char *const gset_labels[NGSETS] = { "PART", "MAP X", "MAP Y", "FILL", "CHAOS", "NOTE", "VEL", "A.VEL" };
+static const char *const gset_long[NGSETS] = { "Part", "Map X", "Map Y", "Fill", "Chaos", "Note", "Velocity",
+                                               "Accent Velocity" };
+/* TURING's */
+static const unsigned char rset_min[NRSETS] = { 2, 0, 1, 0, 0, 0, 1, 0 };
+static const unsigned char rset_max[NRSETS] = { 16, 100, TUR_RANGE_MAX, 0 /* SCALES - 1 */, 100, 2 * NOTE_MAX, 127, 126 };
+static const char *const rset_labels[NRSETS] = { "STEPS", "CHANGE", "RANGE", "SCALE", "FILL", "NOTE", "VEL", "SPREAD" };
+static const char *const rset_long[NRSETS] = { "Steps", "Change", "Range", "Scale", "Fill", "Note",
+                                               "Velocity", "Velocity Spread" };
 
 /* DIV (SNAKE) and CLOCK (185): sequencer steps a move (1 = 1X, 2 = 1/2, 4 =
  * 1/4, 8 = 1/8), or 0: 2X, the track itself at twice its speed (per-track
@@ -363,20 +428,127 @@ static void stages_check(struct stages *g)
 
 static void arp_defaults(struct arpset *a)
 {
-    int c;
-    for (c = 0; c < OFFS; c++)
-        a->off[c] = 0;
     a->set[A_TYPE] = 0;
-    a->set[A_MODE] = AM_UP;
-    a->set[A_SPD] = 0;                      /* 1/16 */
-    a->set[A_RNG] = 2;
-    a->set[A_SCALE] = 0;                    /* CHR: no scale */
-    a->set[A_RPT] = 1;
-    a->set[A_WALK] = WALK_MAX;              /* 0 */
     a->set[A_HOLD] = 0;
-    a->len = OFFS;
-    for (c = 0; c < 7; c++)
-        a->pad[c] = 0;
+    a->set[A_MODE] = AM_UP;
+    a->set[A_RPT] = 1;
+    a->set[A_SPD] = 0;                      /* 1/16 */
+    a->set[A_SCALE] = 0;                    /* CHR: no scale */
+    a->set[A_RNG] = 2;
+    a->set[A_INT] = INT_OCT;
+}
+
+static void euc_defaults(struct euclid *u)
+{
+    int c;
+    u->set[U_STEPS] = 16;
+    u->set[U_HITS] = 5;
+    u->set[U_ROT] = 0;
+    u->set[U_ACC] = 2;
+    u->set[U_NOTE] = NOTE_MAX;              /* +0 */
+    u->set[U_VEL] = 90;
+    u->set[U_AVL] = 127;
+    u->set[U_AROT] = 0;
+    for (c = 0; c < NVSETS; c++)
+        u->setup[c] = 0;
+    u->setup[V_CLOCK] = 1;
+    u->setup[V_ANOT] = NOTE_MAX;            /* +0 */
+    u->setup[V_CHNC] = 100;
+    u->spd = 0;
+}
+
+/* the knobs' ranges that depend on others: HITS and ROT on STEPS, ACC and AROT on HITS */
+static int euc_max(const struct euclid *u, int c)
+{
+    int n = u->set[U_STEPS], k = u->set[U_HITS];
+    switch (c) {
+    case U_HITS: return n;
+    case U_ROT:  return n > 0 ? n - 1 : 0;
+    case U_ACC:  return k;
+    case U_AROT: return k > 0 ? k - 1 : 0;
+    default:     return uset_max[c];
+    }
+}
+
+static void euc_check(struct euclid *u)
+{
+    int c;
+    for (c = 0; c < NUSETS; c++) {
+        int hi = euc_max(u, c);
+        if (u->set[c] < uset_min[c])
+            u->set[c] = uset_min[c];
+        if (u->set[c] > hi)
+            u->set[c] = (unsigned char)hi;
+    }
+    for (c = V_LEN; c < NVSETS; c++)
+        if (c != V_CLOCK && u->setup[c] > vset_max[c])
+            u->setup[c] = c == V_ANOT ? NOTE_MAX : 0;
+}
+
+static void tur_defaults(struct turing *r)
+{
+    int c;
+    r->reg = 0x9a35;
+    r->set[R_LEN] = 8;
+    r->set[R_CHG] = 10;
+    r->set[R_RANGE] = 12;
+    r->set[R_SCALE] = 2;                    /* MIN */
+    r->set[R_DENS] = 75;
+    r->set[R_NOTE] = NOTE_MAX;              /* +0 */
+    r->set[R_VEL] = 110;
+    r->set[R_VSPR] = 40;
+    for (c = 0; c < NVSETS; c++)
+        r->setup[c] = 0;
+    r->setup[V_CLOCK] = 1;
+    r->spd = 0;
+}
+
+static int rset_hi(int c)
+{
+    return c == R_SCALE ? SCALES - 1 : rset_max[c];
+}
+
+static void tur_check(struct turing *r)
+{
+    int c;
+    for (c = 0; c < NRSETS; c++) {
+        if (r->set[c] < rset_min[c])
+            r->set[c] = rset_min[c];
+        if (r->set[c] > rset_hi(c))
+            r->set[c] = (unsigned char)rset_hi(c);
+    }
+    if (r->setup[V_LEN] >= NLENS)
+        r->setup[V_LEN] = 0;
+}
+
+static void grd_defaults(struct grids *g)
+{
+    int c;
+    g->set[G_PART] = 0;
+    g->set[G_X] = 64;
+    g->set[G_Y] = 64;
+    g->set[G_FILL] = 64;
+    g->set[G_CHAOS] = 0;
+    g->set[G_NOTE] = NOTE_MAX;              /* +0 */
+    g->set[G_VEL] = 95;
+    g->set[G_AVL] = 127;
+    for (c = 0; c < NVSETS; c++)
+        g->setup[c] = 0;
+    g->setup[V_CLOCK] = 1;
+    g->spd = 0;
+}
+
+static void grd_check(struct grids *g)
+{
+    int c;
+    for (c = 0; c < NGSETS; c++) {
+        if (g->set[c] < gset_min[c])
+            g->set[c] = gset_min[c];
+        if (g->set[c] > gset_max[c])
+            g->set[c] = gset_max[c];
+    }
+    if (g->setup[V_LEN] >= NLENS)
+        g->setup[V_LEN] = 0;
 }
 
 static void track_defaults(struct track *k)
@@ -416,9 +588,15 @@ struct whole {
     struct snake s;
     struct track k;
     struct arpset a;
+    struct euclid u;
+    struct turing r;
+    struct grids g;
 };
-static struct whole hold_copy[TRACKS], run_copy[TRACKS];
-static unsigned char hold_valid[TRACKS], run_valid[TRACKS], run_active[TRACKS];
+/* One of each (0.11): the page edits one track at a time, so TRIG + NO's copy
+ * and FUNC + NO's are the last track's that took one (hold_t, run_t; -1 none) */
+static struct whole hold_copy, run_copy;
+static signed char hold_t = -1, run_t = -1;
+static unsigned char run_active[TRACKS];
 
 /* a byte copy: struct assignments would call memcpy, which a mod has not */
 static void copy(void *dst, const void *src, unsigned n)
@@ -434,12 +612,18 @@ static void get_whole(int t, struct whole *w)
     copy(&w->s, &digiseq_snake[t], sizeof w->s);
     copy(&w->k, &digiseq_trk[t], sizeof w->k);
     copy(&w->a, &digiseq_arp[t], sizeof w->a);
+    copy(&w->u, &digiseq_euc[t], sizeof w->u);
+    copy(&w->r, &digiseq_tur[t], sizeof w->r);
+    copy(&w->g, &digiseq_grd[t], sizeof w->g);
 }
 static void put_whole(int t, const struct whole *w)
 {
     copy(&digiseq_snake[t], &w->s, sizeof w->s);
     copy(&digiseq_trk[t], &w->k, sizeof w->k);
     copy(&digiseq_arp[t], &w->a, sizeof w->a);
+    copy(&digiseq_euc[t], &w->u, sizeof w->u);
+    copy(&digiseq_tur[t], &w->r, sizeof w->r);
+    copy(&digiseq_grd[t], &w->g, sizeof w->g);
     digiseq_snake[t].set[P_ON] = (unsigned char)(w->k.on && w->k.eng == E_SNAKE);
 }
 
@@ -450,6 +634,9 @@ static void put_together(void)              /* the first UI frame: every track's
         snake_defaults(&digiseq_snake[t]);
         track_defaults(&digiseq_trk[t]);
         arp_defaults(&digiseq_arp[t]);
+        euc_defaults(&digiseq_euc[t]);
+        tur_defaults(&digiseq_tur[t]);
+        grd_defaults(&digiseq_grd[t]);
         reset_req[t] = 1;
     }
     data_ready = 1;
@@ -629,10 +816,261 @@ static void st_advance(struct play185 *p, const struct stages *g, unsigned long 
     st_decide(p, g);
 }
 
-/* ---- the step clock: start, catch up, advance (both types) ---- */
+/* ---- EUCLID ---- */
+struct playeuc {
+    unsigned char pos;          /* the step, 0..STEPS-1 */
+    unsigned char count;        /* sequencer steps since the last pulse */
+    unsigned char moved;        /* this step is a clock pulse */
+    unsigned char fire;         /* the step fires */
+    unsigned char acc;          /* ... accented */
+    unsigned char ghost;        /* ... a ghost note (GHST, on a rest) */
+    unsigned char spin;         /* SPIN so far: the steps the pattern has turned */
+    unsigned char vdrop;        /* VSPR: how far below VEL it plays */
+};
+static struct playeuc peuc[TRACKS];
+volatile unsigned char digiseq_epos[TRACKS], digiseq_espin[TRACKS];   /* for the screen */
+
+static int euc_steps(const struct euclid *u)
+{
+    int n = u->set[U_STEPS];
+    return n < 1 || n > EUC_MAX ? EUC_MAX : n;
+}
+
+/* step i of the pattern, turned spin steps more than ROT: -1 a rest, else
+ * the hit's number (0 the first) */
+static int euc_hit(const struct euclid *u, int i, int spin)
+{
+    int n = euc_steps(u), k = u->set[U_HITS], j;
+    if (k < 1)
+        return -1;
+    if (k > n)
+        k = n;
+    j = (i - u->set[U_ROT] - spin) % n;
+    if (j < 0)
+        j += n;
+    return (j * k) % n < k ? (j * k) / n : -1;
+}
+
+static int euc_accent(const struct euclid *u, int hit)
+{
+    int k = u->set[U_HITS], a = u->set[U_ACC], r;
+    if (hit < 0 || a < 1 || k < 1)
+        return 0;
+    if (a > k)
+        a = k;
+    r = (hit - u->set[U_AROT]) % k;
+    if (r < 0)
+        r += k;
+    return (r * a) % k < a;
+}
+
+/* SETUP's extras (0.12): CHNC, the chance a hit plays (one that doesn't is a
+ * rest); GHST, a ghost note at that velocity on each rest (0: OFF); VSPR, a
+ * random amount below the velocity; SPIN, the steps the pattern turns each
+ * time round. */
+static void euc_decide(struct playeuc *p, const struct euclid *u, unsigned long *rnd)
+{
+    int h = p->moved ? euc_hit(u, p->pos, p->spin) : -1, sp = u->setup[V_VSPR];
+    if (h >= 0 && u->setup[V_CHNC] < 100 && (int)(xorshift(rnd) % 100) >= u->setup[V_CHNC])
+        h = -1;
+    p->fire = (unsigned char)(h >= 0);
+    p->acc = (unsigned char)euc_accent(u, h);
+    p->ghost = (unsigned char)(p->moved && h < 0 && u->setup[V_GHST] > 0);
+    if (p->ghost)
+        p->fire = 1;
+    p->vdrop = (unsigned char)(sp > 0 ? xorshift(rnd) % (unsigned long)(sp + 1) : 0);
+}
+
+static void euc_start(struct playeuc *p, const struct euclid *u, unsigned long *rnd)
+{
+    p->pos = 0;
+    p->count = 0;
+    p->moved = 1;
+    p->spin = 0;
+    euc_decide(p, u, rnd);
+}
+
+static void euc_advance(struct playeuc *p, const struct euclid *u, unsigned long *rnd)
+{
+    int n = euc_steps(u);
+    if (++p->count >= steps_of(u->setup[V_CLOCK])) {
+        p->count = 0;
+        p->moved = 1;
+        if (p->pos + 1 < n) {
+            p->pos++;
+        } else {                            /* round again: SPIN turns it */
+            p->pos = 0;
+            p->spin = (unsigned char)((p->spin + u->setup[V_SPIN]) % n);
+        }
+    } else {
+        p->moved = 0;
+    }
+    if (p->pos >= n)
+        p->pos = 0;
+    if (p->spin >= n)
+        p->spin = 0;
+    euc_decide(p, u, rnd);
+}
+
+static int euc_note_of(const struct euclid *u, const struct playeuc *p, int base)
+{
+    int n = base + u->set[U_NOTE] - NOTE_MAX;
+    if (p->acc)
+        n += u->setup[V_ANOT] - NOTE_MAX;
+    return n;
+}
+
+static int euc_vel_of(const struct euclid *u, const struct playeuc *p)
+{
+    int v = p->ghost ? u->setup[V_GHST] : p->acc ? u->set[U_AVL] : u->set[U_VEL];
+    v -= p->vdrop;
+    return v < 1 ? 1 : v;
+}
+
+static int quantise(int note, int root, int scale);
+/* ---- TURING ---- */
+struct playtur {
+    unsigned char count;        /* sequencer steps since the last pulse */
+    unsigned char moved;        /* this step is a clock pulse */
+    unsigned char fire;         /* the step fires */
+    unsigned char pad;
+    uint16_t reg;               /* the register as the step plays it */
+};
+static struct playtur ptur[TRACKS];
+
+static int tur_len(const struct turing *r)
+{
+    int n = r->set[R_LEN];
+    return n < 2 || n > 16 ? 16 : n;
+}
+
+/* the register one pulse on: the bit leaving the loop, perhaps flipped, back in at bit 0 */
+static uint16_t tur_shift(const struct turing *r, uint16_t reg, unsigned long *rnd)
+{
+    int out = (reg >> (tur_len(r) - 1)) & 1;
+    if (r->set[R_CHG] && (int)(xorshift(rnd) % 100UL) < r->set[R_CHG])
+        out ^= 1;
+    return (uint16_t)((reg << 1) | out);
+}
+
+static int tur_fires(const struct turing *r, uint16_t reg)
+{
+    return ((((reg >> 4) & 0xff) * 100) >> 8) < r->set[R_DENS];
+}
+
+static void tur_decide(struct playtur *p, const struct turing *r)
+{
+    p->fire = (unsigned char)(p->moved && tur_fires(r, p->reg));
+}
+
+static void tur_start(struct playtur *p, struct turing *r)
+{
+    p->count = 0;
+    p->moved = 1;
+    p->reg = r->reg;                        /* it runs on: where it is */
+    tur_decide(p, r);
+}
+
+static void tur_advance(struct playtur *p, struct turing *r, unsigned long *rnd, int keep)
+{
+    if (++p->count >= steps_of(r->setup[V_CLOCK])) {
+        p->count = 0;
+        p->moved = 1;
+        p->reg = tur_shift(r, p->reg, rnd);
+        if (keep)
+            r->reg = p->reg;                /* the register is the track's: it runs on */
+    } else {
+        p->moved = 0;
+    }
+    tur_decide(p, r);
+}
+
+static int tur_note(const struct turing *r, uint16_t reg, int base, int root)
+{
+    int n = base + r->set[R_NOTE] - NOTE_MAX + ((reg & 0xff) * r->set[R_RANGE]) / 255;
+    return quantise(n, root, r->set[R_SCALE]);
+}
+
+static int tur_velocity(const struct turing *r, uint16_t reg)
+{
+    int v = r->set[R_VEL] - (r->set[R_VSPR] * ((reg >> 8) & 0xff)) / 255;
+    return v < 1 ? 1 : v;
+}
+
+/* ---- GRIDS ---- */
+struct playgrd {
+    unsigned char pos;          /* the step, 0-31 */
+    unsigned char count;        /* sequencer steps since the last pulse */
+    unsigned char moved;        /* this step is a clock pulse */
+    unsigned char fire;         /* the step fires */
+    unsigned char acc;          /* ... accented */
+    unsigned char pert;         /* CHAOS: what this time round adds to the levels */
+};
+static struct playgrd pgrd[TRACKS];
+volatile unsigned char digiseq_gpos[TRACKS], digiseq_gpert[TRACKS];     /* for the screen */
+
+/* the map's level for a step of the track's part at its X, Y (Grids' ReadDrumMap) */
+static int grd_level(const struct grids *g, int step)
+{
+    int x = g->set[G_X] << 1, y = g->set[G_Y] << 1;         /* 0-254 */
+    int i = x >> 6, j = y >> 6, xx = (x << 2) & 0xff, yy = (y << 2) & 0xff;
+    int off = (g->set[G_PART] % GRD_PARTS) * GRD_STEPS + (step & (GRD_STEPS - 1));
+    int a = grids_map[5 * i + j][off], b = grids_map[5 * (i + 1) + j][off];
+    int c = grids_map[5 * i + j + 1][off], d = grids_map[5 * (i + 1) + j + 1][off];
+    int ab = a + (((b - a) * xx) >> 8), cd = c + (((d - c) * xx) >> 8);
+    return ab + (((cd - ab) * yy) >> 8);
+}
+
+/* -> 0 a rest, 1 a hit, 2 an accented hit */
+static int grd_hit(const struct grids *g, int step, int pert)
+{
+    int level = grd_level(g, step);
+    level = level < 255 - pert ? level + pert : 255;
+    if (level <= 255 - (g->set[G_FILL] << 1))
+        return 0;
+    return level > 192 ? 2 : 1;
+}
+
+static void grd_decide(struct playgrd *p, const struct grids *g, unsigned long *rnd)
+{
+    int h;
+    if (p->moved && p->pos == 0)            /* a new time round: CHAOS */
+        p->pert = (unsigned char)(((xorshift(rnd) >> 8 & 0xff) * (g->set[G_CHAOS] >> 1)) >> 8);
+    h = p->moved ? grd_hit(g, p->pos, p->pert) : 0;
+    p->fire = (unsigned char)(h > 0);
+    p->acc = (unsigned char)(h > 1);
+}
+
+static void grd_start(struct playgrd *p, const struct grids *g, unsigned long *rnd)
+{
+    p->pos = 0;
+    p->count = 0;
+    p->moved = 1;
+    grd_decide(p, g, rnd);
+}
+
+static void grd_advance(struct playgrd *p, const struct grids *g, unsigned long *rnd)
+{
+    if (++p->count >= steps_of(g->setup[V_CLOCK])) {
+        p->count = 0;
+        p->moved = 1;
+        p->pos = (unsigned char)((p->pos + 1) & (GRD_STEPS - 1));
+    } else {
+        p->moved = 0;
+    }
+    grd_decide(p, g, rnd);
+}
+
+/* ---- the step clock: start, catch up, advance (every type but ARP) ---- */
 static void eng_start(int t)
 {
-    if (digiseq_trk[t].eng == E_185)
+    if (digiseq_trk[t].eng == E_GRD)
+        grd_start(&pgrd[t], &digiseq_grd[t], &irq_rand);
+    else if (digiseq_trk[t].eng == E_TUR)
+        tur_start(&ptur[t], &digiseq_tur[t]);
+    else if (digiseq_trk[t].eng == E_EUC)
+        euc_start(&peuc[t], &digiseq_euc[t], &irq_rand);
+    else if (digiseq_trk[t].eng == E_185)
         st_start(&p185[t], &digiseq_trk[t].st);
     else
         snake_start(&play[t], &digiseq_snake[t], snake_len(&digiseq_snake[t]));
@@ -640,7 +1078,13 @@ static void eng_start(int t)
 
 static void eng_advance(int t, unsigned long *rnd)
 {
-    if (digiseq_trk[t].eng == E_185)
+    if (digiseq_trk[t].eng == E_GRD)
+        grd_advance(&pgrd[t], &digiseq_grd[t], rnd);
+    else if (digiseq_trk[t].eng == E_TUR)
+        tur_advance(&ptur[t], &digiseq_tur[t], rnd, 1);
+    else if (digiseq_trk[t].eng == E_EUC)
+        euc_advance(&peuc[t], &digiseq_euc[t], rnd);
+    else if (digiseq_trk[t].eng == E_185)
         st_advance(&p185[t], &digiseq_trk[t].st, rnd);
     else
         snake_advance(&play[t], &digiseq_snake[t], snake_len(&digiseq_snake[t]), rnd);
@@ -660,7 +1104,7 @@ static void eng_advance(int t, unsigned long *rnd)
 #define A_TRK_LEN   0x381                   /* s8: the track's LEN */
 #define A_INF       0xffffu
 #define MAXHELD     8                       /* notes held at once (keys) */
-#define MAXARP      (MAXHELD * 4)           /* times 4 octaves */
+#define MAXARP      (MAXHELD * RNG_MAX)     /* times RNG */
 
 /* The keyboard (0.4): the keys held on an audio track in keyboard mode (FUNC +
  * TRK), as kbsites.s hands them over (UI task). A key's note is held while it
@@ -686,8 +1130,6 @@ struct parp {
     unsigned char vel;
     unsigned char p;            /* where the arp is in MODE's cycle */
     unsigned char rep;          /* RPT: the plays of this note so far */
-    unsigned char oidx;         /* the offset step */
-    signed char walk;           /* WALK so far */
     unsigned short elapsed;     /* steps since the trig */
     unsigned short units;       /* how long it is held, in 1/16 steps (A_INF: on) */
     signed char held[MAXHELD];  /* the notes, low to high */
@@ -695,7 +1137,6 @@ struct parp {
     unsigned char perm[MAXARP]; /* SHUF's order this cycle */
 };
 static struct parp parp[TRACKS];
-volatile unsigned char digiseq_aoff[TRACKS];        /* for the screen: the offset step */
 
 static int aclamp(int n)
 {
@@ -882,8 +1323,7 @@ static void arp_start(int t, int step, const int8_t notes[SQ_NOTES])
     a->capvel = 1;
     a->elapsed = 0;
     a->units = (unsigned short)arp_units(t, step);
-    a->p = a->rep = a->oidx = 0;
-    a->walk = 0;
+    a->p = a->rep = 0;
 }
 
 /* The arp's next note */
@@ -892,14 +1332,14 @@ static int arp_next(int t)
     struct parp *a = &parp[t];
     const struct arpset *s = &digiseq_arp[t];
     int n = a->nheld, rng = s->set[A_RNG], mode = s->set[A_MODE], rpt = s->set[A_RPT];
-    int m, period, idx, len = s->len, note;
+    int m, period, idx, note, iv = s->set[A_INT];
     const signed char *list;
     if (n < 1 || n > MAXHELD)
         return -1;
-    if (rng < 1 || rng > 4) rng = 1;
+    if (rng < 1 || rng > RNG_MAX) rng = 1;
     if (mode >= AMODES) mode = AM_UP;
     if (rpt < 1 || rpt > 4) rpt = 1;
-    if (len < 1 || len > OFFS) len = OFFS;
+    if (iv < 1 || iv > INT_OCT) iv = INT_OCT;
     m = n * rng;
     period = arp_period(mode, m);
     if (a->p >= period)
@@ -909,21 +1349,12 @@ static int arp_next(int t)
     idx = arp_index(a, mode, a->p, m);
     if (idx < 0 || idx >= m)
         idx = 0;
-    if (a->oidx >= len)
-        a->oidx = 0;
-    if (s->set[A_WALK] == WALK_MAX)
-        a->walk = 0;                        /* WALK 0: back where it started */
     list = mode == AM_ORDER ? a->order : a->held;
-    note = list[idx % n] + 12 * (idx / n) + s->off[a->oidx] + a->walk;
-    digiseq_aoff[t] = a->oidx;
+    note = list[idx % n] + iv * (idx / n);
     if (++a->rep >= rpt) {
         a->rep = 0;
-        a->oidx = (unsigned char)((a->oidx + 1) % len);
-        if (++a->p >= period) {
-            int w = a->walk + (s->set[A_WALK] - WALK_MAX);
+        if (++a->p >= period)
             a->p = 0;
-            a->walk = (signed char)(w > WALK_WRAP || w < -WALK_WRAP ? 0 : w);
-        }
     }
     return aclamp(note);
 }
@@ -953,8 +1384,7 @@ static void arp_trig(int32_t track, int32_t first, uint32_t *trig)
                 a->live = a->active = 1;
                 a->capvel = 0;
                 a->elapsed = 0;
-                a->p = a->rep = a->oidx = 0;
-                a->walk = 0;
+                a->p = a->rep = 0;
             } else if (a->elapsed < 0xfffe) {
                 a->elapsed++;
             }
@@ -1016,7 +1446,13 @@ void digiseq_trig(int32_t track, int32_t step, int32_t first, uint32_t *trig)
         } else {
             eng_advance(track, &irq_rand);
         }
-        if (digiseq_trk[track].eng == E_185) {
+        if (digiseq_trk[track].eng == E_GRD) {
+            digiseq_gpos[track] = pgrd[track].pos;
+            digiseq_gpert[track] = pgrd[track].pert;
+        } else if (digiseq_trk[track].eng == E_EUC) {
+            digiseq_epos[track] = peuc[track].pos;
+            digiseq_espin[track] = peuc[track].spin;
+        } else if (digiseq_trk[track].eng == E_185) {
             digiseq_stage[track] = p185[track].stage;
             digiseq_pulse[track] = p185[track].pulse;
         } else {
@@ -1029,7 +1465,13 @@ void digiseq_trig(int32_t track, int32_t step, int32_t first, uint32_t *trig)
             digiseq_cell[track] = p->cell;
         }
     }
-    if (digiseq_trk[track].eng == E_185) {
+    if (digiseq_trk[track].eng == E_GRD) {
+        fire = pgrd[track].fire;
+    } else if (digiseq_trk[track].eng == E_TUR) {
+        fire = ptur[track].fire;
+    } else if (digiseq_trk[track].eng == E_EUC) {
+        fire = peuc[track].fire;
+    } else if (digiseq_trk[track].eng == E_185) {
         fire = p185[track].fire;
     } else {
         const struct play *p = &play[track];
@@ -1064,6 +1506,22 @@ static int clamp_note(int n)
 }
 
 static int len185(int track);
+static int lenEuc(int track);
+static int lenTur(int track);
+static int lenGrd(int track);
+static int grd_vel(int track)
+{
+    const struct grids *g = &digiseq_grd[track];
+    return pgrd[track].acc ? g->set[G_AVL] : g->set[G_VEL];
+}
+static int euc_note(int track, int base)
+{
+    return euc_note_of(&digiseq_euc[track], &peuc[track], base);
+}
+static int euc_vel(int track)
+{
+    return euc_vel_of(&digiseq_euc[track], &peuc[track]);
+}
 void digiseq_notes(int32_t track, int32_t step, int32_t generated, int8_t notes[SQ_NOTES])
 {
     struct sq_track info;
@@ -1113,7 +1571,13 @@ void digiseq_notes(int32_t track, int32_t step, int32_t generated, int8_t notes[
     else
         base = notes[0] >= 0 ? notes[0] : 60;
     root = base % 12;                       /* the Digitakt keeps no key: the scale's root is NOTE */
-    if (digiseq_trk[track].eng == E_185) {
+    if (digiseq_trk[track].eng == E_GRD) {
+        n = base + digiseq_grd[track].set[G_NOTE] - NOTE_MAX;
+    } else if (digiseq_trk[track].eng == E_TUR) {
+        n = tur_note(&digiseq_tur[track], ptur[track].reg, base, root);
+    } else if (digiseq_trk[track].eng == E_EUC) {
+        n = euc_note(track, base);
+    } else if (digiseq_trk[track].eng == E_185) {
         const struct stages *g = &digiseq_trk[track].st;
         n = quantise(base + g->pitch[p185[track].stage], root, g->set[S_SCALE]);
     } else {
@@ -1124,7 +1588,13 @@ void digiseq_notes(int32_t track, int32_t step, int32_t generated, int8_t notes[
     for (i = 1; i < SQ_NOTES; i++)          /* one note, not the step's chord */
         notes[i] = 0;
     if (rec_live()) {                       /* 0.8: recording live, onto its step */
-        if (digiseq_trk[track].eng == E_185)
+        if (digiseq_trk[track].eng == E_GRD)
+            arp_record(track, step, notes[0], grd_vel(track), lenGrd(track));
+        else if (digiseq_trk[track].eng == E_TUR)
+            arp_record(track, step, notes[0], tur_velocity(&digiseq_tur[track], ptur[track].reg), lenTur(track));
+        else if (digiseq_trk[track].eng == E_EUC)
+            arp_record(track, step, notes[0], euc_vel(track), lenEuc(track));
+        else if (digiseq_trk[track].eng == E_185)
             arp_record(track, step, notes[0], digiseq_trk[track].st.vel[p185[track].stage], len185(track));
         else
             arp_record(track, step, notes[0], digiseq_snake[track].vel[play[track].cell], 255);
@@ -1147,7 +1617,13 @@ void digiseq_vel(int32_t track, int32_t step, int32_t *vel)
         } else if (a->active) {
             *vel = a->vel;
         }
-    } else if (eng_on(track, E_185))
+    } else if (eng_on(track, E_GRD))
+        *vel = grd_vel(track);
+    else if (eng_on(track, E_TUR))
+        *vel = tur_velocity(&digiseq_tur[track], ptur[track].reg);
+    else if (eng_on(track, E_EUC))
+        *vel = euc_vel(track);
+    else if (eng_on(track, E_185))
         *vel = digiseq_trk[track].st.vel[p185[track].stage];
     else if (eng_on(track, E_SNAKE))
         *vel = digiseq_snake[track].vel[play[track].cell];
@@ -1181,11 +1657,38 @@ static int len185(int track)
     return 255;
 }
 
+/* EUCLID's note length as LEN's index (255: the track's) */
+static int lenEuc(int track)
+{
+    int v = digiseq_euc[track].setup[V_LEN];
+    return v > 0 && v < NLENS ? len_for_halves(nlen_halves[v]) : 255;
+}
+
+static int lenGrd(int track)
+{
+    int v = digiseq_grd[track].setup[V_LEN];
+    return v > 0 && v < NLENS ? len_for_halves(nlen_halves[v]) : 255;
+}
+
+static int lenTur(int track)
+{
+    int v = digiseq_tur[track].setup[V_LEN];
+    return v > 0 && v < NLENS ? len_for_halves(nlen_halves[v]) : 255;
+}
+
 void digiseq_len(int32_t track, int32_t step, int32_t *len)
 {
     const struct play185 *p;
     const struct stages *g;
     (void)step;
+    if (eng_on(track, E_EUC) || eng_on(track, E_TUR) || eng_on(track, E_GRD)) {   /* LEN (SETUP), else the track's */
+        int l = eng_on(track, E_GRD) ? lenGrd(track) : eng_on(track, E_TUR) ? lenTur(track) : lenEuc(track);
+        if (l != 255)
+            *len = l;
+        else if (PATTERN)
+            *len = (signed char)TRACK_OF(PATTERN, track)[TR_LEN_OFF_TRACK];
+        return;
+    }
     if (eng_on(track, E_ARP)) {             /* the track's LEN, the trig's note included */
         if (parp[track].thru)
             return;
@@ -1320,7 +1823,8 @@ static int speed_half(int i)
 
 static unsigned char *spd_keep(int t, int eng)
 {
-    return eng == E_185 ? &digiseq_trk[t].spd : &digiseq_snake[t].pad[0];
+    return eng == E_185 ? &digiseq_trk[t].spd : eng == E_EUC ? &digiseq_euc[t].spd :
+           eng == E_TUR ? &digiseq_tur[t].spd : eng == E_GRD ? &digiseq_grd[t].spd : &digiseq_snake[t].pad[0];
 }
 
 static void speed_sync(void)
@@ -1332,6 +1836,9 @@ static void speed_sync(void)
         int eng = k->eng;
         int want = pt && k->on &&                   /* ARP: never 2X */
                    (eng == E_185 ? k->st.set[S_CLOCK] == 0 :
+                    eng == E_EUC ? digiseq_euc[t].setup[V_CLOCK] == 0 :
+                    eng == E_TUR ? digiseq_tur[t].setup[V_CLOCK] == 0 :
+                    eng == E_GRD ? digiseq_grd[t].setup[V_CLOCK] == 0 :
                     eng == E_SNAKE ? digiseq_snake[t].set[P_DIV] == 0 : 0);
         if (mod_pat[t] && (mod_pat[t] != pat || !want || mod_eng[t] != eng)) {     /* put it back */
             uint8_t *tr = TRACK_OF(mod_pat[t], t);
@@ -1401,6 +1908,12 @@ static int print_track(int t)
     uint32_t last;
     struct play qs;
     struct play185 q8;
+    struct playeuc qe;
+    struct playtur qt;
+    struct playgrd qg;
+    const struct grids *gr = &digiseq_grd[t];
+    struct turing *tr = &digiseq_tur[t];
+    const struct euclid *u = &digiseq_euc[t];
     const struct snake *s = &digiseq_snake[t];
     const struct stages *g = &k->st;
     int slen = snake_len(s);
@@ -1415,6 +1928,9 @@ static int print_track(int t)
     copy(print_bak, trk, TRACK_STRIDE);
     copy(&qs, &play[t], sizeof qs);
     copy(&q8, &p185[t], sizeof q8);
+    copy(&qe, &peuc[t], sizeof qe);
+    copy(&qt, &ptur[t], sizeof qt);
+    copy(&qg, &pgrd[t], sizeof qg);
     print_t = (signed char)t;
     print_pat = pat;
     last = sq_clock[t].last;
@@ -1425,7 +1941,37 @@ static int print_track(int t)
         int fire, n, vel, l = -1;
         unsigned w;
         step = (first + i) % len;
-        if (k->eng == E_185) {
+        if (k->eng == E_GRD) {
+            if (i == 0 && pending)
+                grd_start(&qg, gr, &rnd);
+            else
+                grd_advance(&qg, gr, &rnd);
+            fire = qg.fire;
+            n = base + gr->set[G_NOTE] - NOTE_MAX;
+            vel = qg.acc ? gr->set[G_AVL] : gr->set[G_VEL];
+            if (gr->setup[V_LEN] > 0 && gr->setup[V_LEN] < NLENS)
+                l = len_for_halves(nlen_halves[gr->setup[V_LEN]]);
+        } else if (k->eng == E_TUR) {              /* what it would play next, the register left as it is */
+            if (i == 0 && pending)
+                tur_start(&qt, tr);
+            else
+                tur_advance(&qt, tr, &rnd, 0);
+            fire = qt.fire;
+            n = tur_note(tr, qt.reg, base, root);
+            vel = tur_velocity(tr, qt.reg);
+            if (tr->setup[V_LEN] > 0 && tr->setup[V_LEN] < NLENS)
+                l = len_for_halves(nlen_halves[tr->setup[V_LEN]]);
+        } else if (k->eng == E_EUC) {
+            if (i == 0 && pending)
+                euc_start(&qe, u, &rnd);
+            else
+                euc_advance(&qe, u, &rnd);
+            fire = qe.fire;
+            n = euc_note_of(u, &qe, base);
+            vel = euc_vel_of(u, &qe);
+            if (u->setup[V_LEN] > 0 && u->setup[V_LEN] < NLENS)
+                l = len_for_halves(nlen_halves[u->setup[V_LEN]]);
+        } else if (k->eng == E_185) {
             if (i == 0 && pending)
                 st_start(&q8, g);
             else
@@ -1459,7 +2005,7 @@ static int print_track(int t)
             trk[TR_VEL_OFF + step] = (uint8_t)vel;
             trk[TR_MICRO_OFF + step] = 0;           /* on the step, as it played */
             trk[TR_COND_OFF + step] = 0xff;         /* no condition: it plays every time */
-            if (k->eng == E_185)
+            if (k->eng == E_185 || k->eng == E_EUC || k->eng == E_TUR || k->eng == E_GRD)
                 trk[TR_LEN_OFF + step] = (uint8_t)l;    /* -1 (255): the track's LEN */
         } else if ((w & W_TRIG) && word_syn(trk, w)) {
             w &= ~(unsigned)W_TRIG;         /* a rest: no note trig (lock trigs stay) */
@@ -1555,18 +2101,26 @@ static void *popup_obj(void)
 /* pages: SNAKE's and 185's, numbered within the type */
 enum { PG_NOTES, PG_GATES, PG_VEL, PG_PATH, SNAKE_PAGES };
 enum { PG8_PITCH, PG8_VEL, PG8_PULSES, PG8_MODE, PG8_DIV, PG8_SETUP, PAGES_185 };
-static const char *const snake_pages[SNAKE_PAGES] = { "NOTES", "GATES", "VELOCITY", "PATH" };
-static const char *const pages185[PAGES_185] = { "PITCH", "VELOCITY", "PULSES", "MODE", "DIV", "SETUP" };
-static const char *const snake_what[SNAKE_PAGES] = { "Notes", "Gates", "Velocity", "Path" };
-static const char *const what185[PAGES_185] = { "Pitch", "Velocity", "Pulses", "Modes", "Divisions", "Setup" };
-enum { PGA_OFFS, PGA_ARP, ARP_PAGES };
-static const char *const arp_pages[ARP_PAGES] = { "OFFSETS", "ARP" };
-static const char *const arp_what[ARP_PAGES] = { "Offsets", "Arp" };
+static const char *const snake_pages[SNAKE_PAGES] = { "NOTES", "GATES", "VELOCITY", "SETUP" };
+static const char *const pages185[PAGES_185] = { "NOTES", "VELOCITY", "PULSES", "MODE", "DIV", "SETUP" };
+static const char *const snake_what[SNAKE_PAGES] = { "Notes", "Gates", "Velocity", "Setup" };
+static const char *const what185[PAGES_185] = { "Notes", "Velocity", "Pulses", "Modes", "Divisions", "Setup" };
+enum { PGU_EUC, PGU_SETUP, EUC_PAGES };
+static const char *const euc_pages[EUC_PAGES] = { "EUCLID", "SETUP" };
+static const char *const euc_what[EUC_PAGES] = { "Euclid", "Setup" };
+enum { PGG_GRD, PGG_SETUP, GRD_PAGES };
+static const char *const grd_pages[GRD_PAGES] = { "GRIDS", "SETUP" };
+static const char *const grd_what[GRD_PAGES] = { "Grids", "Setup" };
+enum { PGR_TUR, PGR_SETUP, TUR_PAGES };
+static const char *const tur_pages[TUR_PAGES] = { "TURING", "SETUP" };
+static const char *const tur_what[TUR_PAGES] = { "Turing", "Setup" };
+enum { PGA_ARP, ARP_PAGES };
+static const char *const arp_pages[ARP_PAGES] = { "ARP" };
+static const char *const arp_what[ARP_PAGES] = { "Arp" };
 
 unsigned char digiseq_open;                         /* the page is up */
 unsigned char digiseq_pg_snake, digiseq_pg_185;     /* the page shown, per type */
-unsigned char digiseq_pg_arp;
-static unsigned char arp_sel[TRACKS];               /* OFFSETS: the step selected (its half on knobs) */
+unsigned char digiseq_pg_arp, digiseq_pg_euc, digiseq_pg_tur, digiseq_pg_grd;
 void *digiseq_brain;
 static unsigned char trig_held, trig_used, stock_held, stock_used;
 static unsigned char func_held, trk_held;
@@ -1583,17 +2137,20 @@ static int ui_track(void)
 static int eng_of(int t)
 {
     int e = digiseq_trk[t].eng;
-    return e == E_185 || e == E_ARP ? e : E_SNAKE;
+    return e == E_185 || e == E_ARP || e == E_EUC || e == E_TUR || e == E_GRD ? e : E_SNAKE;
 }
 
 static unsigned char *pg_of(int eng)
 {
-    return eng == E_185 ? &digiseq_pg_185 : eng == E_ARP ? &digiseq_pg_arp : &digiseq_pg_snake;
+    return eng == E_185 ? &digiseq_pg_185 : eng == E_ARP ? &digiseq_pg_arp :
+           eng == E_EUC ? &digiseq_pg_euc : eng == E_TUR ? &digiseq_pg_tur :
+           eng == E_GRD ? &digiseq_pg_grd : &digiseq_pg_snake;
 }
 
 static int pages_of(int eng)
 {
-    return eng == E_185 ? PAGES_185 : eng == E_ARP ? ARP_PAGES : SNAKE_PAGES;
+    return eng == E_185 ? PAGES_185 : eng == E_ARP ? ARP_PAGES : eng == E_EUC ? EUC_PAGES : eng == E_TUR ? TUR_PAGES :
+           eng == E_GRD ? GRD_PAGES : SNAKE_PAGES;
 }
 
 static int last_page(int eng)
@@ -1617,7 +2174,7 @@ static void set_type(int t, int ty)
     if (ty == 0) {
         k->on = 0;
     } else {
-        if (k->eng != ty)                   /* stay on TYPE: the new type's last page */
+        if (k->eng != ty || !k->on)         /* stay on TYPE: the new type's last page */
             *pg_of(ty) = (unsigned char)last_page(ty);
         k->eng = (unsigned char)ty;
         k->on = 1;
@@ -1837,69 +2394,188 @@ static void st_paste(struct stages *g, const struct stages *from, int pg)
 }
 
 /* ---- ARP's page edits ---- */
-static void arp_randomise(struct arpset *a, int pg)
+static void arp_randomise(struct arpset *a)  /* MODE, SPD, RNG, RPT (INT stays) */
 {
-    int c;
-    if (pg == PGA_OFFS) {                   /* mostly roots, octaves and fifths */
-        static const signed char pick[16] = { 0, 0, 0, 0, 12, 12, -12, 7, 7, 5, 3, 10, -5, 24, 2, -7 };
-        for (c = 0; c < OFFS; c++)
-            a->off[c] = pick[(xorshift(&ui_rand) >> 7) & 15];
-        a->len = (unsigned char)(2 + xorshift(&ui_rand) % (OFFS - 1));
-    } else {                                /* MODE, SPD, RNG, RPT, WALK */
-        static const unsigned char spd[8] = { 0, 0, 0, 0, 1, 1, 2, 3 };
-        static const unsigned char rpt[8] = { 1, 1, 1, 1, 1, 2, 2, 3 };
-        static const signed char walk[8] = { 0, 0, 0, 0, 1, -1, 2, 5 };
-        a->set[A_MODE] = (unsigned char)(xorshift(&ui_rand) % AMODES);
-        a->set[A_SPD] = spd[xorshift(&ui_rand) & 7];
-        a->set[A_RNG] = (unsigned char)(1 + xorshift(&ui_rand) % 3);
-        a->set[A_RPT] = rpt[xorshift(&ui_rand) & 7];
-        a->set[A_WALK] = (unsigned char)(WALK_MAX + walk[xorshift(&ui_rand) & 7]);
-    }
+    static const unsigned char spd[8] = { 0, 0, 0, 0, 1, 1, 2, 3 };
+    static const unsigned char rpt[8] = { 1, 1, 1, 1, 1, 2, 2, 3 };
+    a->set[A_MODE] = (unsigned char)(xorshift(&ui_rand) % AMODES);
+    a->set[A_SPD] = spd[xorshift(&ui_rand) & 7];
+    a->set[A_RNG] = (unsigned char)(a->set[A_INT] == INT_OCT ? 1 + xorshift(&ui_rand) % 3
+                                                             : 2 + xorshift(&ui_rand) % (RNG_MAX - 1));
+    a->set[A_RPT] = rpt[xorshift(&ui_rand) & 7];
 }
 
-static void arp_clear(struct arpset *a, int pg)
+static void arp_clear(struct arpset *a)
 {
     struct arpset d;
     int c;
     arp_defaults(&d);
-    if (pg == PGA_OFFS) {
-        for (c = 0; c < OFFS; c++)
-            a->off[c] = 0;
-        a->len = d.len;
+    for (c = 1; c < NASETS; c++)
+        a->set[c] = d.set[c];
+}
+
+static void arp_paste(struct arpset *a, const struct arpset *from)
+{
+    int c;
+    for (c = 1; c < NASETS; c++)
+        a->set[c] = from->set[c];
+}
+
+/* ---- EUCLID's page edits ---- */
+static void euc_randomise(struct euclid *u, int pg)
+{
+    if (pg == PGU_EUC) {                    /* a pattern: STEPS 5-16, HITS, ROT, accents */
+        static const unsigned char steps[8] = { 16, 16, 16, 12, 8, 7, 5, 13 };
+        int n = steps[xorshift(&ui_rand) & 7];
+        u->set[U_STEPS] = (unsigned char)n;
+        u->set[U_HITS] = (unsigned char)(1 + xorshift(&ui_rand) % (unsigned long)(n - 1 > 1 ? n - 1 : 1));
+        u->set[U_ROT] = (unsigned char)(xorshift(&ui_rand) % (unsigned long)n);
+        u->set[U_ACC] = (unsigned char)(xorshift(&ui_rand) % (unsigned long)(u->set[U_HITS] + 1));
+        u->set[U_AROT] = (unsigned char)(xorshift(&ui_rand) % (unsigned long)u->set[U_HITS]);
+    } else {                                /* CLOCK and ANOT */
+        static const unsigned char clk[8] = { 1, 1, 1, 1, 1, 2, 2, 0 };
+        static const signed char anot[8] = { 0, 0, 0, 12, 12, 7, -12, 5 };
+        u->setup[V_CLOCK] = clk[xorshift(&ui_rand) & 7];
+        u->setup[V_ANOT] = (unsigned char)(NOTE_MAX + anot[xorshift(&ui_rand) & 7]);
+    }
+    euc_check(u);
+}
+
+static void euc_clear(struct euclid *u, int pg)
+{
+    struct euclid d;
+    int c;
+    euc_defaults(&d);
+    if (pg == PGU_EUC) {
+        for (c = 0; c < NUSETS; c++)
+            u->set[c] = d.set[c];
     } else {
-        for (c = 1; c < NASETS; c++)
-            a->set[c] = d.set[c];
+        for (c = 1; c < NVSETS; c++)
+            u->setup[c] = d.setup[c];
     }
 }
 
-static void arp_nudge(struct arpset *a, int pg, int d, int func)
+static void euc_paste(struct euclid *u, const struct euclid *from, int pg)
 {
     int c;
-    if (pg != PGA_OFFS)
-        return;
-    for (c = 0; c < OFFS; c++)
-        a->off[c] = (signed char)clampi(a->off[c] + d * (func ? 12 : 1), -OFF_MAX, OFF_MAX);
+    if (pg == PGU_EUC) {
+        for (c = 0; c < NUSETS; c++)
+            u->set[c] = from->set[c];
+    } else {
+        for (c = 1; c < NVSETS; c++)
+            u->setup[c] = from->setup[c];
+    }
+    euc_check(u);
 }
 
-static void arp_paste(struct arpset *a, const struct arpset *from, int pg)
+static void euc_nudge(struct euclid *u, int d)     /* UP / DOWN: ROT */
+{
+    int n = euc_steps(u);
+    u->set[U_ROT] = (unsigned char)(((int)u->set[U_ROT] + d + n) % n);
+}
+
+/* ---- TURING's page edits ---- */
+static void tur_randomise(struct turing *r, int pg)
+{
+    if (pg == PGR_TUR) {                    /* a new register */
+        r->reg = (uint16_t)(xorshift(&ui_rand) >> 5);
+    } else {                                /* CLOCK */
+        static const unsigned char clk[8] = { 1, 1, 1, 1, 1, 2, 2, 0 };
+        r->setup[V_CLOCK] = clk[xorshift(&ui_rand) & 7];
+    }
+}
+
+static void tur_clear(struct turing *r, int pg)
+{
+    struct turing d;
+    int c;
+    tur_defaults(&d);
+    if (pg == PGR_TUR) {
+        r->reg = d.reg;
+        for (c = 0; c < NRSETS; c++)
+            r->set[c] = d.set[c];
+    } else {
+        for (c = 1; c < NVSETS; c++)
+            r->setup[c] = d.setup[c];
+    }
+}
+
+static void tur_paste(struct turing *r, const struct turing *from, int pg)
 {
     int c;
-    if (pg == PGA_OFFS) {
-        for (c = 0; c < OFFS; c++)
-            a->off[c] = from->off[c];
-        a->len = from->len;
+    if (pg == PGR_TUR) {
+        r->reg = from->reg;
+        for (c = 0; c < NRSETS; c++)
+            r->set[c] = from->set[c];
     } else {
-        for (c = 1; c < NASETS; c++)
-            a->set[c] = from->set[c];
+        for (c = 1; c < NVSETS; c++)
+            r->setup[c] = from->setup[c];
     }
+    tur_check(r);
+}
+
+static void tur_nudge(struct turing *r, int d)     /* UP / DOWN: turn the loop a step */
+{
+    int n = tur_len(r), b;
+    uint16_t m = (uint16_t)((1u << n) - 1), loop = r->reg & m;
+    if (d > 0)
+        b = (loop >> (n - 1)) & 1, loop = (uint16_t)(((loop << 1) | b) & m);
+    else
+        b = loop & 1, loop = (uint16_t)((loop >> 1) | (b << (n - 1)));
+    r->reg = (uint16_t)((r->reg & ~m) | loop);
+}
+
+/* ---- GRIDS' page edits ---- */
+static void grd_randomise(struct grids *g, int pg)
+{
+    if (pg == PGG_GRD) {                    /* a new place on the map; the part stays */
+        g->set[G_X] = (unsigned char)(xorshift(&ui_rand) >> 9 & 127);
+        g->set[G_Y] = (unsigned char)(xorshift(&ui_rand) >> 9 & 127);
+    } else {
+        static const unsigned char clk[8] = { 1, 1, 1, 1, 1, 1, 2, 0 };
+        g->setup[V_CLOCK] = clk[xorshift(&ui_rand) & 7];
+    }
+}
+
+static void grd_clear(struct grids *g, int pg)
+{
+    struct grids d;
+    int c;
+    grd_defaults(&d);
+    if (pg == PGG_GRD) {
+        for (c = 1; c < NGSETS; c++)        /* the part stays */
+            g->set[c] = d.set[c];
+    } else {
+        for (c = 1; c < NVSETS; c++)
+            g->setup[c] = d.setup[c];
+    }
+}
+
+static void grd_paste(struct grids *g, const struct grids *from, int pg)
+{
+    int c;
+    if (pg == PGG_GRD) {
+        for (c = 0; c < NGSETS; c++)
+            g->set[c] = from->set[c];
+    } else {
+        for (c = 1; c < NVSETS; c++)
+            g->setup[c] = from->setup[c];
+    }
+    grd_check(g);
 }
 
 /* ---- shared page actions ---- */
 static void page_randomise(int t, int pg)
 {
     ui_rand ^= frames;
-    if (eng_of(t) == E_ARP)
-        arp_randomise(&digiseq_arp[t], pg);
+    if (eng_of(t) == E_GRD)
+        grd_randomise(&digiseq_grd[t], pg);
+    else if (eng_of(t) == E_TUR)
+        tur_randomise(&digiseq_tur[t], pg);
+    else if (eng_of(t) == E_EUC)
+        euc_randomise(&digiseq_euc[t], pg);
+    else if (eng_of(t) == E_ARP)
+        arp_randomise(&digiseq_arp[t]);
     else if (eng_of(t) == E_185)
         st_randomise(&digiseq_trk[t].st, pg);
     else
@@ -1909,10 +2585,14 @@ static void page_randomise(int t, int pg)
 static void randomise_all(int t)
 {
     ui_rand ^= frames;
-    if (eng_of(t) == E_ARP) {               /* the offsets and MODE */
-        struct arpset *a = &digiseq_arp[t];
-        arp_randomise(a, PGA_OFFS);
-        a->set[A_MODE] = (unsigned char)(xorshift(&ui_rand) % AMODES);
+    if (eng_of(t) == E_GRD) {
+        grd_randomise(&digiseq_grd[t], PGG_GRD);
+    } else if (eng_of(t) == E_TUR) {
+        tur_randomise(&digiseq_tur[t], PGR_TUR);
+    } else if (eng_of(t) == E_EUC) {
+        euc_randomise(&digiseq_euc[t], PGU_EUC);
+    } else if (eng_of(t) == E_ARP) {
+        arp_randomise(&digiseq_arp[t]);
     } else if (eng_of(t) == E_185) {
         st_randomise(&digiseq_trk[t].st, PG8_PITCH);
         st_randomise(&digiseq_trk[t].st, PG8_VEL);
@@ -1928,7 +2608,8 @@ static void randomise_all(int t)
 static const char *what_of(int eng, int pg)
 {
     return eng == E_185 ? what185[pg % PAGES_185] : eng == E_ARP ? arp_what[pg % ARP_PAGES]
-                                                             : snake_what[pg % SNAKE_PAGES];
+         : eng == E_EUC ? euc_what[pg % EUC_PAGES] : eng == E_TUR ? tur_what[pg % TUR_PAGES]
+         : eng == E_GRD ? grd_what[pg % GRD_PAGES] : snake_what[pg % SNAKE_PAGES];
 }
 
 /* COPY / PASTE: one page, from any track to any other of the same type */
@@ -1969,6 +2650,7 @@ static int next_stop(int v, long d, const signed char *stops, int n)
 static const signed char note_stops[5] = { -24, -12, 0, 12, 24 };
 static const signed char vel_stops[5] = { 1, 32, 64, 96, 127 };
 static const signed char range_stops[3] = { 1, 12, 24 };
+static const signed char ghost_stops[5] = { 0, 16, 32, 48, 64 };
 
 static void open_page(void)
 {
@@ -2010,8 +2692,8 @@ static int page_key(int t, unsigned long key, unsigned long flags)
             trig_held = 1;
             trig_used = 0;
             print_t = -1;
-            get_whole(t, &hold_copy[t]);
-            hold_valid[t] = 1;
+            get_whole(t, &hold_copy);
+            hold_t = (signed char)t;
         }
         return 1;
     }
@@ -2026,29 +2708,31 @@ static int page_key(int t, unsigned long key, unsigned long flags)
             || key == KEY_YES || key == KEY_NO
             || (key >= KEY_STEP1 && key < KEY_STEP1 + CELLS && !trk_held &&
                 ((eng == E_SNAKE && pg == PG_GATES) || (eng == E_185 && pg == PG8_MODE)))
-            || (key >= KEY_STEP1 && key < KEY_STEP1 + OFFS && !trk_held &&
-                eng == E_ARP && pg == PGA_OFFS);
+            || (key >= KEY_STEP1 && key < KEY_STEP1 + 16 && !trk_held &&
+                ((eng == E_EUC && pg == PGU_EUC) ||
+                 (eng == E_TUR && pg == PGR_TUR) || (eng == E_GRD && pg == PGG_GRD && key < KEY_STEP1 + 3)));
 
-    if (key == KEY_YES && func) {                       /* randomise the note pages */
+    if (key == KEY_YES && func && digiseq_trk[t].on) {  /* randomise the note pages */
         trig_used = 1;
-        if (!run_active[t]) {
-            get_whole(t, &run_copy[t]);
-            run_valid[t] = run_active[t] = 1;
+        if (!run_active[t] || run_t != t) {
+            get_whole(t, &run_copy);
+            run_t = (signed char)t;
+            run_active[t] = 1;
         }
         randomise_all(t);
-        POPUP("%s randomised", eng == E_185 ? "Stages" : eng == E_ARP ? "Arp" : "Snake");
+        POPUP("%s randomised", eng == E_185 ? "Stages" : eng == E_ARP ? "Arp" : eng == E_EUC ? "Euclid" : eng == E_TUR ? "Register" : eng == E_GRD ? "Map place" : "Snake");
         return 1;
     }
     if (key == KEY_NO && trig_held) {
         trig_used = 1;
         unprint(t);
-        reload(t, &hold_copy[t], hold_valid[t]);
+        reload(t, &hold_copy, hold_t == t);
         run_active[t] = 0;
         return 1;
     }
     if (key == KEY_NO && func) {
         trig_used = 1;
-        reload(t, &run_copy[t], run_valid[t]);
+        reload(t, &run_copy, run_t == t);
         run_active[t] = 0;
         return 1;
     }
@@ -2060,6 +2744,10 @@ static int page_key(int t, unsigned long key, unsigned long flags)
         POPUP("Type=%s", type_names[ty]);
         return 1;
     }
+    if (!digiseq_trk[t].on)                 /* OFF: nothing to edit */
+        return key == KEY_YES || key == KEY_NO || key == KEY_LEFT || key == KEY_RIGHT
+            || key == KEY_UP || key == KEY_DOWN || (key >= KEY_STEP1 && key < KEY_STEP1 + 16 && !trk_held)
+            || (trig_held && (key == KEY_REC || key == KEY_STOP || key == KEY_PLAY));
     if (key == KEY_YES && trig_held) {
         trig_used = 1;
         page_randomise(t, pg);
@@ -2105,8 +2793,14 @@ static int page_key(int t, unsigned long key, unsigned long flags)
             return 1;
         }
         *pgp = (unsigned char)clip_pg;
-        if (eng == E_ARP)
-            arp_paste(&digiseq_arp[t], &clip.a, clip_pg);
+        if (eng == E_GRD)
+            grd_paste(&digiseq_grd[t], &clip.g, clip_pg);
+        else if (eng == E_TUR)
+            tur_paste(&digiseq_tur[t], &clip.r, clip_pg);
+        else if (eng == E_EUC)
+            euc_paste(&digiseq_euc[t], &clip.u, clip_pg);
+        else if (eng == E_ARP)
+            arp_paste(&digiseq_arp[t], &clip.a);
         else if (eng == E_185)
             st_paste(&digiseq_trk[t].st, &clip.k.st, clip_pg);
         else
@@ -2118,8 +2812,14 @@ static int page_key(int t, unsigned long key, unsigned long flags)
     }
     if (key == KEY_PLAY && trig_held) {                                      /* CLEAR */
         trig_used = 1;
-        if (eng == E_ARP)
-            arp_clear(&digiseq_arp[t], pg);
+        if (eng == E_GRD)
+            grd_clear(&digiseq_grd[t], pg);
+        else if (eng == E_TUR)
+            tur_clear(&digiseq_tur[t], pg);
+        else if (eng == E_EUC)
+            euc_clear(&digiseq_euc[t], pg);
+        else if (eng == E_ARP)
+            arp_clear(&digiseq_arp[t]);
         else if (eng == E_185)
             st_clear(&digiseq_trk[t].st, pg);
         else
@@ -2138,8 +2838,19 @@ static int page_key(int t, unsigned long key, unsigned long flags)
         return 1;
     }
     if (key == KEY_UP || key == KEY_DOWN) {
-        if (eng == E_ARP)
-            arp_nudge(&digiseq_arp[t], pg, key == KEY_UP ? 1 : -1, func);
+        if (eng == E_GRD) {                 /* UP / DOWN: FILL */
+            struct grids *g = &digiseq_grd[t];
+            g->set[G_FILL] = (unsigned char)clampi(g->set[G_FILL] + (key == KEY_UP ? 4 : -4), 0, 127);
+            POPUP("Fill=%d", g->set[G_FILL]);
+        } else if (eng == E_TUR) {
+            tur_nudge(&digiseq_tur[t], key == KEY_UP ? 1 : -1);
+            POPUP("Register turned %s", key == KEY_UP ? "on" : "back");
+        } else if (eng == E_EUC) {
+            struct euclid *u = &digiseq_euc[t];
+            euc_nudge(u, key == KEY_UP ? 1 : -1);
+            POPUP("Rotate=%d", u->set[U_ROT]);
+        } else if (eng == E_ARP)
+            ;
         else if (eng == E_185)
             st_nudge(&digiseq_trk[t].st, pg, key == KEY_UP ? 1 : -1, func);
         else
@@ -2147,18 +2858,40 @@ static int page_key(int t, unsigned long key, unsigned long flags)
         edited(t);
         return 1;
     }
-    if (!trk_held && eng == E_ARP && pg == PGA_OFFS && key >= KEY_STEP1 && key < KEY_STEP1 + OFFS) {
+    if (!trk_held && eng == E_GRD && pg == PGG_GRD && key >= KEY_STEP1 && key < KEY_STEP1 + GRD_PARTS) {
+        int c = (int)(key - KEY_STEP1);     /* trig keys 1-3: the part */
+        digiseq_grd[t].set[G_PART] = (unsigned char)c;
+        POPUP("Part=%s", part_long[c]);
+        edited(t);
+        return 1;
+    }
+    if (!trk_held && eng == E_TUR && pg == PGR_TUR && key >= KEY_STEP1 && key < KEY_STEP1 + 16) {
         int c = (int)(key - KEY_STEP1);
-        struct arpset *a = &digiseq_arp[t];
-        if (func) {                         /* FUNC + trig key: LEN */
-            a->len = (unsigned char)(c + 1);
-            edited(t);
-            POPUP("Offset Length=%d", c + 1);
-        } else {                            /* select: knobs A-H edit its half */
-            arp_sel[t] = (unsigned char)c;
-            POPUP("Offset %d=%c%d", c + 1, a->off[c] < 0 ? '-' : '+',
-                  a->off[c] < 0 ? -a->off[c] : a->off[c]);
+        struct turing *r = &digiseq_tur[t];
+        if (func) {                         /* FUNC + trig key: flip that bit */
+            r->reg ^= (uint16_t)(1u << c);
+            POPUP("Bit %d=%d", c + 1, (r->reg >> c) & 1);
+        } else {                            /* trig key: LEN */
+            r->set[R_LEN] = (unsigned char)(c < 1 ? 2 : c + 1);
+            POPUP("Steps=%d", r->set[R_LEN]);
         }
+        edited(t);
+        return 1;
+    }
+    if (!trk_held && eng == E_EUC && pg == PGU_EUC && key >= KEY_STEP1 && key < KEY_STEP1 + EUC_MAX) {
+        int c = (int)(key - KEY_STEP1);
+        struct euclid *u = &digiseq_euc[t];
+        if (func) {                         /* FUNC + trig key: HITS */
+            u->set[U_HITS] = (unsigned char)(c + 1);
+            euc_check(u);
+            POPUP("Hits=%d", u->set[U_HITS]);
+        } else {                            /* trig key: STEPS */
+            u->set[U_STEPS] = (unsigned char)(c + 1);
+            euc_check(u);
+            reset_req[t] = 1;
+            POPUP("Steps=%d", c + 1);
+        }
+        edited(t);
         return 1;
     }
     if (!trk_held && key >= KEY_STEP1 && key < KEY_STEP1 + CELLS) {
@@ -2264,7 +2997,7 @@ static void snake_enc(int t, struct snake *s, int pg, int c, long d)
             if (s->set[c] == 0 && !per_track_mode())
                 POPUP("2X needs SCALE per track");
             else
-                POPUP("Division=%s", div_name(s->set[c]));
+                POPUP("Clock=%s", div_name(s->set[c]));
         } else {
             s->set[c] = (unsigned char)clampi(s->set[c] + d, set_min[c], set_max[c]);
         }
@@ -2280,7 +3013,7 @@ static void st_enc(int t, struct stages *g, int pg, int c, long d)
     case PG8_PITCH:
         if (func_held) {
             g->pitch[c] = (signed char)next_stop(g->pitch[c], d, note_stops, 5);
-            POPUP("Pitch %d=%c%d", c + 1, g->pitch[c] < 0 ? '-' : '+',
+            POPUP("Note %d=%c%d", c + 1, g->pitch[c] < 0 ? '-' : '+',
                   g->pitch[c] < 0 ? -g->pitch[c] : g->pitch[c]);
         } else {
             g->pitch[c] = (signed char)clampi(g->pitch[c] + d, -NOTE_MAX, NOTE_MAX);
@@ -2326,36 +3059,204 @@ static void st_enc(int t, struct stages *g, int pg, int c, long d)
     }
 }
 
-static void arp_enc(int t, struct arpset *a, int pg, int c, long d)
+static void arp_enc(int t, struct arpset *a, int c, long d)
 {
-    if (pg == PGA_OFFS) {                   /* knobs A-H: the selected step's half */
-        int s = (arp_sel[t] & 8) + c;
-        if (func_held)
-            a->off[s] = (signed char)next_stop(a->off[s], d, note_stops, 5);
-        else
-            a->off[s] = (signed char)clampi(a->off[s] + d, -OFF_MAX, OFF_MAX);
-        POPUP("Offset %d=%c%d", s + 1, a->off[s] < 0 ? '-' : '+', a->off[s] < 0 ? -a->off[s] : a->off[s]);
-        return;
-    }
     if (c == A_TYPE) {
         int ty = clampi(type_of(t) + d, 0, NTYPES - 1);
         set_type(t, ty);
         POPUP("Type=%s", type_names[ty]);
         return;
     }
+    if (c == A_SPD)                         /* CLOCK: right is faster, as the others' */
+        d = -d;
     a->set[c] = (unsigned char)clampi(a->set[c] + d, aset_min[c], aset_max[c]);
     switch (c) {
     case A_MODE: POPUP("Arp Mode=%s", amode_names[a->set[c] % AMODES]); break;
-    case A_SPD:  POPUP("Arp Speed=%s", spd_names[a->set[c] % SPDS]); break;
-    case A_RNG:  POPUP("Arp Range=%d Oct", a->set[c]); break;
+    case A_SPD:  POPUP("Arp Clock=%s", spd_names[a->set[c] % SPDS]); break;
+    case A_RNG:
+        if (a->set[A_INT] == INT_OCT)
+            POPUP("Arp Range=%d Oct", a->set[c]);
+        else
+            POPUP("Arp Range=%d Steps", a->set[c]);
+        break;
     case A_SCALE: POPUP("Arp Scale=%s", scale_names[a->set[c] % SCALES]); break;
-    case A_RPT:  POPUP("Repeats=%dX", a->set[c]); break;
-    case A_WALK: {
-        int w = a->set[c] - WALK_MAX;
-        POPUP("Walk=%c%d", w < 0 ? '-' : '+', w < 0 ? -w : w);
+    case A_RPT:  POPUP("Arp Repeat=%dX", a->set[c]); break;
+    case A_INT:
+        if (a->set[c] == INT_OCT)
+            POPUP("Arp Interval=Octave");
+        else
+            POPUP("Arp Interval=+%d", a->set[c]);
+        break;
+    default:     POPUP("Arp Hold=%s", a->set[c] ? "ON" : "OFF"); break;
+    }
+}
+
+static void euc_enc(int t, struct euclid *u, int pg, int c, long d)
+{
+    if (pg == PGU_EUC) {
+        int v;
+        if (func_held && (c == U_VEL || c == U_AVL))
+            v = next_stop(u->set[c], d, vel_stops, 5);
+        else if (func_held && c == U_NOTE)
+            v = NOTE_MAX + next_stop(u->set[c] - NOTE_MAX, d, note_stops, 5);
+        else
+            v = clampi(u->set[c] + d, uset_min[c], euc_max(u, c));
+        u->set[c] = (unsigned char)v;
+        euc_check(u);
+        if (c == U_STEPS)
+            reset_req[t] = 1;
+        if (c == U_NOTE) {
+            int o = u->set[c] - NOTE_MAX;
+            POPUP("Note=%c%d", o < 0 ? '-' : '+', o < 0 ? -o : o);
+        } else {
+            POPUP("%s=%d", uset_long[c], u->set[c]);
+        }
+        return;
+    }
+    switch (c) {
+    case V_TYPE: {
+        int ty = clampi(type_of(t) + d, 0, NTYPES - 1);
+        set_type(t, ty);
+        POPUP("Type=%s", type_names[ty]);
         break;
     }
-    default:     POPUP("Arp Hold=%s", a->set[c] ? "ON" : "OFF"); break;
+    case V_CLOCK:
+        u->setup[c] = (unsigned char)div_turn(u->setup[c], d);
+        if (u->setup[c] == 0 && !per_track_mode())
+            POPUP("2X needs SCALE per track");
+        else
+            POPUP("Clock=%s", div_name(u->setup[c]));
+        break;
+    case V_LEN:
+        u->setup[c] = (unsigned char)clampi(u->setup[c] + d, 0, NLENS - 1);
+        POPUP("Note Length=%s", nlen_names[u->setup[c]]);
+        break;
+    case V_ANOT: {
+        int o;
+        if (func_held)
+            u->setup[c] = (unsigned char)(NOTE_MAX + next_stop(u->setup[c] - NOTE_MAX, d, note_stops, 5));
+        else
+            u->setup[c] = (unsigned char)clampi(u->setup[c] + d, 0, 2 * NOTE_MAX);
+        o = u->setup[c] - NOTE_MAX;
+        POPUP("Accent Note=%c%d", o < 0 ? '-' : '+', o < 0 ? -o : o);
+        break;
+    }
+    case V_CHNC:
+        u->setup[c] = (unsigned char)clampi(u->setup[c] + (func_held ? 10 : 1) * d, 0, 100);
+        POPUP("Hit Chance=%d%%", u->setup[c]);
+        break;
+    case V_GHST:
+        if (func_held)
+            u->setup[c] = (unsigned char)next_stop(u->setup[c], d, ghost_stops, 5);
+        else
+            u->setup[c] = (unsigned char)clampi(u->setup[c] + d, 0, 127);
+        if (u->setup[c])
+            POPUP("Ghost Velocity=%d", u->setup[c]);
+        else
+            POPUP("Ghost Notes=OFF");
+        break;
+    case V_VSPR:
+        u->setup[c] = (unsigned char)clampi(u->setup[c] + d, 0, vset_max[V_VSPR]);
+        POPUP("Velocity Spread=%d", u->setup[c]);
+        break;
+    case V_SPIN:
+        u->setup[c] = (unsigned char)clampi(u->setup[c] + d, 0, euc_steps(u) - 1);
+        POPUP("Spin=%d a cycle", u->setup[c]);
+        break;
+    default:
+        break;
+    }
+}
+
+static void tur_enc(int t, struct turing *r, int pg, int c, long d)
+{
+    if (pg == PGR_TUR) {
+        int v;
+        if (func_held && c == R_VEL)
+            v = next_stop(r->set[c], d, vel_stops, 5);
+        else if (func_held && c == R_NOTE)
+            v = NOTE_MAX + next_stop(r->set[c] - NOTE_MAX, d, note_stops, 5);
+        else if (func_held && (c == R_CHG || c == R_DENS))
+            v = clampi(r->set[c] + 10 * d, rset_min[c], rset_hi(c));
+        else
+            v = clampi(r->set[c] + d, rset_min[c], rset_hi(c));
+        r->set[c] = (unsigned char)v;
+        switch (c) {
+        case R_NOTE:
+            v -= NOTE_MAX;
+            POPUP("Note=%c%d", v < 0 ? '-' : '+', v < 0 ? -v : v);
+            break;
+        case R_SCALE: POPUP("Scale=%s", scale_names[v % SCALES]); break;
+        case R_CHG:
+        case R_DENS:  POPUP("%s=%d%%", rset_long[c], v); break;
+        default:      POPUP("%s=%d", rset_long[c], v); break;
+        }
+        return;
+    }
+    switch (c) {
+    case V_TYPE: {
+        int ty = clampi(type_of(t) + d, 0, NTYPES - 1);
+        set_type(t, ty);
+        POPUP("Type=%s", type_names[ty]);
+        break;
+    }
+    case V_CLOCK:
+        r->setup[c] = (unsigned char)div_turn(r->setup[c], d);
+        if (r->setup[c] == 0 && !per_track_mode())
+            POPUP("2X needs SCALE per track");
+        else
+            POPUP("Clock=%s", div_name(r->setup[c]));
+        break;
+    case V_LEN:
+        r->setup[c] = (unsigned char)clampi(r->setup[c] + d, 0, NLENS - 1);
+        POPUP("Note Length=%s", nlen_names[r->setup[c]]);
+        break;
+    default:
+        break;
+    }
+}
+
+static void grd_enc(int t, struct grids *g, int pg, int c, long d)
+{
+    if (pg == PGG_GRD) {
+        int v;
+        if (func_held && (c == G_VEL || c == G_AVL))
+            v = next_stop(g->set[c], d, vel_stops, 5);
+        else if (func_held && c == G_NOTE)
+            v = NOTE_MAX + next_stop(g->set[c] - NOTE_MAX, d, note_stops, 5);
+        else if (func_held && c >= G_X && c <= G_CHAOS)
+            v = clampi(g->set[c] + 8 * d, gset_min[c], gset_max[c]);
+        else
+            v = clampi(g->set[c] + d, gset_min[c], gset_max[c]);
+        g->set[c] = (unsigned char)v;
+        if (c == G_PART)
+            POPUP("Part=%s", part_long[v % GRD_PARTS]);
+        else if (c == G_NOTE)
+            POPUP("Note=%c%d", v < NOTE_MAX ? '-' : '+', v < NOTE_MAX ? NOTE_MAX - v : v - NOTE_MAX);
+        else
+            POPUP("%s=%d", gset_long[c], v);
+        return;
+    }
+    switch (c) {
+    case V_TYPE: {
+        int ty = clampi(type_of(t) + d, 0, NTYPES - 1);
+        set_type(t, ty);
+        POPUP("Type=%s", type_names[ty]);
+        break;
+    }
+    case V_CLOCK:
+        g->setup[c] = (unsigned char)div_turn(g->setup[c], d);
+        if (g->setup[c] == 0 && !per_track_mode())
+            POPUP("2X needs SCALE per track");
+        else
+            POPUP("Clock=%s", div_name(g->setup[c]));
+        break;
+    case V_LEN:
+        g->setup[c] = (unsigned char)clampi(g->setup[c] + d, 0, NLENS - 1);
+        POPUP("Note Length=%s", nlen_names[g->setup[c]]);
+        break;
+    default:
+        break;
     }
 }
 
@@ -2380,9 +3281,24 @@ int digiseq_enc(void *brain, void *ev)
     if (pg >= pages_of(eng))
         pg = 0;
     redraw = 1;
+    if (!digiseq_trk[t].on) {               /* OFF: A is TYPE, the rest do nothing */
+        if (e == 1) {
+            int ty = clampi(d, 0, NTYPES - 1);
+            set_type(t, ty);
+            edited(t);
+            POPUP("Type=%s", type_names[ty]);
+        }
+        return 1;
+    }
     edited(t);
-    if (eng == E_ARP)
-        arp_enc(t, &digiseq_arp[t], pg, (int)e - 1, d);
+    if (eng == E_GRD)
+        grd_enc(t, &digiseq_grd[t], pg, (int)e - 1, d);
+    else if (eng == E_TUR)
+        tur_enc(t, &digiseq_tur[t], pg, (int)e - 1, d);
+    else if (eng == E_EUC)
+        euc_enc(t, &digiseq_euc[t], pg, (int)e - 1, d);
+    else if (eng == E_ARP)
+        arp_enc(t, &digiseq_arp[t], (int)e - 1, d);
     else if (eng == E_185)
         st_enc(t, &digiseq_trk[t].st, pg, (int)e - 1, d);
     else
@@ -2450,8 +3366,11 @@ void digiseq_tick(void *ctrl)
             static int last_pos = -1, last_play = -1, last_t = -1;
             int ut = ui_track(), playing = (int)TRANSPORT;
             int e = eng_of(ut);
-            int pos = e == E_185 ? digiseq_stage[ut] * 8 + digiseq_pulse[ut]
-                    : e == E_ARP ? digiseq_aoff[ut] + 32 * parp[ut].active : digiseq_cell[ut];
+            int pos = e == E_GRD ? digiseq_gpos[ut] + 64 * digiseq_gpert[ut]
+                    : e == E_TUR ? ptur[ut].reg
+                    : e == E_EUC ? digiseq_epos[ut] + 32 * digiseq_espin[ut]
+                    : e == E_185 ? digiseq_stage[ut] * 8 + digiseq_pulse[ut]
+                    : e == E_ARP ? parp[ut].active : digiseq_cell[ut];
             if (pos != last_pos || playing != last_play || ut != last_t) {
                 last_pos = pos;
                 last_play = playing;
@@ -2637,57 +3556,193 @@ static void draw_185(void *bmp, int t, int base, int root)
     TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", pages185[pg], pg + 1, PAGES_185);
 }
 
-/* ARP. OFFSETS: the 16 steps as bars from a centre line (+-24), the steps
- * past LEN as dots, the knobs' half underlined, the step playing framed.
- * ARP: the settings, a box a knob, as SETUP. */
+/* A knob's box, as SNAKE's PATH page: knob c (A-D the top row, E-H the
+ * bottom), its label above, its value (drawn by the caller at *vx, *vy)
+ * below. mini: the shorter boxes under a row of steps (0.12). */
+static void knob_box(void *bmp, int c, int mini, const char *label, int *vx, int *vy)
+{
+    int x0 = 32 * (c & 3), y0 = mini ? (c < 4 ? 23 : 7) : (c < 4 ? 31 : 8);
+    FRAMERECT(bmp, x0, y0, x0 + 30, y0 + (mini ? 14 : 21), 1);
+    TEXTF(bmp, FONT5, x0 + 3, y0 + (mini ? 8 : 14), -1, "%s", label);
+    *vx = x0 + 3;
+    *vy = y0 + (mini ? 2 : 4);
+}
+
+static void draw_offset(void *bmp, int x, int y, int v)    /* NOTE_MAX + semitones */
+{
+    TEXTF(bmp, FONT5, x, y, -1, "%c%d", v < NOTE_MAX ? '-' : '+', v < NOTE_MAX ? NOTE_MAX - v : v - NOTE_MAX);
+}
+
+/* A row of steps, 8 pixels a step as the trig keys (EUCLID, TURING, GRIDS):
+ * kind 0 past the pattern (a dot), 1 a rest (a frame), 2 a hit (filled), 3
+ * an accent (filled, taller); the step playing underlined. y: the row's
+ * foot, h: a step's height, ha: an accent's. */
+static void draw_step(void *bmp, int c, int y, int h, int ha, int kind, int cur)
+{
+    int x0 = 8 * c;
+    if (kind == 0)
+        FILLRECT(bmp, x0 + 3, y + h / 2 - 1, x0 + 4, y + h / 2, 1);
+    else if (kind == 1)
+        FRAMERECT(bmp, x0 + 1, y, x0 + 6, y + h - 1, 1);
+    else
+        FILLRECT(bmp, x0 + 1, y, x0 + 6, y + (kind == 3 ? ha : h) - 1, 1);
+    if (cur)
+        FILLRECT(bmp, x0 + 1, y - 2, x0 + 6, y - 2, 1);
+}
+
+/* SETUP for EUCLID, TURING and GRIDS: TYPE (A), LEN (B) and CLOCK (E) as
+ * SNAKE's TYPE and DIV; EUCLID's extras on the rest. */
+static void draw_setup(void *bmp, int t, const unsigned char *setup, int all)
+{
+    int c, x, y;
+    for (c = 0; c < NVSETS; c++) {
+        int v = setup[c];
+        if (!all && c != V_TYPE && c != V_LEN && c != V_CLOCK)
+            continue;
+        knob_box(bmp, c, 0, vset_labels[c], &x, &y);
+        switch (c) {
+        case V_TYPE:  TEXTF(bmp, FONT5, x, y, -1, "%s", type_names[type_of(t)]); break;
+        case V_CLOCK: TEXTF(bmp, FONT5, x, y, -1, "%s", div_name(v)); break;
+        case V_LEN:   TEXTF(bmp, FONT5, x, y, -1, "%s", nlen_names[v % NLENS]); break;
+        case V_ANOT:  draw_offset(bmp, x, y, v); break;
+        case V_CHNC:  TEXTF(bmp, FONT5, x, y, -1, "%d%%", v); break;
+        case V_GHST:
+            if (v)
+                TEXTF(bmp, FONT5, x, y, -1, "%d", v);
+            else
+                TEXTF(bmp, FONT5, x, y, -1, "OFF");
+            break;
+        default:      TEXTF(bmp, FONT5, x, y, -1, "%d", v); break;
+        }
+    }
+}
+
+/* ARP: the settings, a box a knob, as SNAKE's PATH page */
 static void draw_arp(void *bmp, int t)
 {
     const struct arpset *a = &digiseq_arp[t];
-    int pg = digiseq_pg_arp % ARP_PAGES, c;
-    if (pg == PGA_OFFS) {
-        int len = a->len < 1 || a->len > OFFS ? OFFS : a->len;
-        int half = arp_sel[t] & 8, mid = 31;
-        int cur = digiseq_trk[t].on && TRANSPORT == 1 && parp[t].active ? digiseq_aoff[t] : -1;
-        FILLRECT(bmp, 0, mid, 127, mid, 1);
-        for (c = 0; c < OFFS; c++) {
-            int x0 = 8 * c, v = a->off[c], h = (v * 20) / OFF_MAX;
-            if (c >= len) {
-                FILLRECT(bmp, x0 + 3, mid + 2, x0 + 4, mid + 2, 1);
-                continue;
-            }
-            if (h > 0)
-                FILLRECT(bmp, x0 + 2, mid, x0 + 5, mid + h, 1);
-            else if (h < 0)
-                FILLRECT(bmp, x0 + 2, mid + h, x0 + 5, mid, 1);
-            else
-                FILLRECT(bmp, x0 + 2, mid - 1, x0 + 5, mid + 1, 1);
-            if (c == cur)
-                FRAMERECT(bmp, x0, 9, x0 + 7, 53, 1);
-            if (c == arp_sel[t])
-                FILLRECT(bmp, x0 + 1, 52, x0 + 6, 52, 1);
-        }
-        FILLRECT(bmp, 64 * (half >> 3), 8, 64 * (half >> 3) + 63, 8, 1);   /* the knobs' half */
-        TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", arp_pages[pg], pg + 1, ARP_PAGES);
-        return;
-    }
+    int c, x, y;
     for (c = 0; c < NASETS; c++) {
-        int x0 = 32 * (c & 3), y0 = (c < 4) ? 31 : 8;
-        int x1 = x0 + 30, y1 = y0 + 21, v = a->set[c];
-        FRAMERECT(bmp, x0, y0, x1, y1, 1);
-        TEXTF(bmp, FONT5, x0 + 3, y0 + 14, -1, "%s", aset_labels[c]);
+        int v = a->set[c];
+        knob_box(bmp, c, 0, aset_labels[c], &x, &y);
         switch (c) {
-        case A_TYPE: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", type_names[type_of(t)]); break;
-        case A_MODE: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", amode_names[v % AMODES]); break;
-        case A_SPD:  TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", spd_names[v % SPDS]); break;
-        case A_RNG:  TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%d OCT", v); break;
-        case A_SCALE: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", scale_names[v % SCALES]); break;
-        case A_RPT:  TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%dX", v); break;
-        case A_WALK: TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%c%d", v < WALK_MAX ? '-' : '+',
-                           v < WALK_MAX ? WALK_MAX - v : v - WALK_MAX); break;
-        default:     TEXTF(bmp, FONT5, x0 + 3, y0 + 4, -1, "%s", v ? "ON" : "OFF"); break;
+        case A_TYPE: TEXTF(bmp, FONT5, x, y, -1, "%s", type_names[type_of(t)]); break;
+        case A_MODE: TEXTF(bmp, FONT5, x, y, -1, "%s", amode_names[v % AMODES]); break;
+        case A_SPD:  TEXTF(bmp, FONT5, x, y, -1, "%s", spd_names[v % SPDS]); break;
+        case A_RNG:
+            if (a->set[A_INT] == INT_OCT)
+                TEXTF(bmp, FONT5, x, y, -1, "%d OCT", v);
+            else
+                TEXTF(bmp, FONT5, x, y, -1, "%d STEP", v);
+            break;
+        case A_SCALE: TEXTF(bmp, FONT5, x, y, -1, "%s", scale_names[v % SCALES]); break;
+        case A_RPT:  TEXTF(bmp, FONT5, x, y, -1, "%dX", v); break;
+        case A_INT:
+            if (v == INT_OCT)
+                TEXTF(bmp, FONT5, x, y, -1, "OCT");
+            else
+                TEXTF(bmp, FONT5, x, y, -1, "+%d", v);
+            break;
+        default:     TEXTF(bmp, FONT5, x, y, -1, "%s", v ? "ON" : "OFF"); break;
         }
     }
-    TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", arp_pages[pg], pg + 1, ARP_PAGES);
+    TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", arp_pages[0], 1, ARP_PAGES);
+}
+
+/* EUCLID. EUCLID: the pattern as a row of STEPS steps over the trig keys
+ * (as it plays: SPIN turns it), a hit filled, an accent taller, a rest a
+ * frame, past STEPS a dot, the step playing underlined; under it the knobs'
+ * boxes. SETUP: as SNAKE's PATH page. */
+static void draw_euc(void *bmp, int t)
+{
+    const struct euclid *u = &digiseq_euc[t];
+    int pg = digiseq_pg_euc % EUC_PAGES, c, n = euc_steps(u), x, y;
+    if (pg == PGU_EUC) {
+        int playing = digiseq_trk[t].on && TRANSPORT == 1;
+        int cur = playing ? digiseq_epos[t] : -1, spin = playing ? digiseq_espin[t] : 0;
+        for (c = 0; c < EUC_MAX; c++) {
+            int h = c < n ? euc_hit(u, c, spin) : -1;
+            draw_step(bmp, c, 41, 8, 12, c >= n ? 0 : h < 0 ? 1 : euc_accent(u, h) ? 3 : 2, c == cur);
+        }
+        for (c = 0; c < NUSETS; c++) {
+            knob_box(bmp, c, 1, uset_labels[c], &x, &y);
+            if (c == U_NOTE)
+                draw_offset(bmp, x, y, u->set[c]);
+            else
+                TEXTF(bmp, FONT5, x, y, -1, "%d", u->set[c]);
+        }
+    } else {
+        draw_setup(bmp, t, u->setup, 1);
+    }
+    TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", euc_pages[pg], pg + 1, EUC_PAGES);
+}
+
+/* TURING. TURING: the register's loop, its LEN bits from bit 0 (the newest)
+ * on the left, a 1 filled, a 0 framed, past LEN a dot; the bit that comes
+ * round next underlined; under it the knobs' boxes (the note it plays now
+ * is on the title line). SETUP: TYPE, LEN, CLOCK. */
+static void draw_tur(void *bmp, int t)
+{
+    const struct turing *r = &digiseq_tur[t];
+    int pg = digiseq_pg_tur % TUR_PAGES, c, n = tur_len(r), x, y;
+    uint16_t reg = digiseq_trk[t].on && TRANSPORT == 1 ? ptur[t].reg : r->reg;
+    if (pg == PGR_TUR) {
+        for (c = 0; c < 16; c++)
+            draw_step(bmp, c, 41, 10, 10, c >= n ? 0 : (reg >> c) & 1 ? 2 : 1, c == n - 1);
+        for (c = 0; c < NRSETS; c++) {
+            int v = r->set[c];
+            knob_box(bmp, c, 1, rset_labels[c], &x, &y);
+            switch (c) {
+            case R_NOTE:  draw_offset(bmp, x, y, v); break;
+            case R_SCALE: TEXTF(bmp, FONT5, x, y, -1, "%s", scale_names[v % SCALES]); break;
+            case R_CHG:
+            case R_DENS:  TEXTF(bmp, FONT5, x, y, -1, "%d%%", v); break;
+            default:      TEXTF(bmp, FONT5, x, y, -1, "%d", v); break;
+            }
+        }
+    } else {
+        draw_setup(bmp, t, r->setup, 0);
+    }
+    TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", tur_pages[pg], pg + 1, TUR_PAGES);
+}
+
+/* GRIDS. GRIDS: the part's 32 steps as EUCLID's, in two rows over the trig
+ * keys (1-16 the top, 17-32 under it); under them the knobs' boxes. SETUP:
+ * TYPE, LEN, CLOCK. */
+static void draw_grd(void *bmp, int t)
+{
+    const struct grids *g = &digiseq_grd[t];
+    int pg = digiseq_pg_grd % GRD_PAGES, c, x, y;
+    if (pg == PGG_GRD) {
+        int playing = digiseq_trk[t].on && TRANSPORT == 1;
+        int cur = playing ? digiseq_gpos[t] : -1, pert = playing ? digiseq_gpert[t] : 0;
+        for (c = 0; c < GRD_STEPS; c++) {
+            int h = grd_hit(g, c, pert);
+            draw_step(bmp, c & 15, c < 16 ? 48 : 41, 3, 4, h > 1 ? 3 : h ? 2 : 1, c == cur);
+        }
+        for (c = 0; c < NGSETS; c++) {
+            int v = g->set[c];
+            knob_box(bmp, c, 1, gset_labels[c], &x, &y);
+            if (c == G_PART)
+                TEXTF(bmp, FONT5, x, y, -1, "%s", part_names[v % GRD_PARTS]);
+            else if (c == G_NOTE)
+                draw_offset(bmp, x, y, v);
+            else
+                TEXTF(bmp, FONT5, x, y, -1, "%d", v);
+        }
+    } else {
+        draw_setup(bmp, t, g->setup, 0);
+    }
+    TEXTF(bmp, FONT5, 72, 57, -1, "%s %d/%d", grd_pages[pg], pg + 1, GRD_PAGES);
+}
+
+/* TYPE OFF (0.12): TYPE alone, on A */
+static void draw_off(void *bmp, int t)
+{
+    int x, y;
+    knob_box(bmp, 0, 0, "TYPE", &x, &y);
+    TEXTF(bmp, FONT5, x, y, -1, "%s", type_names[type_of(t)]);
+    TEXTF(bmp, FONT5, 36, 44, -1, "TURN A FOR A TYPE");
 }
 
 /* The stock drop-down is drawn in the title bar (rows 54-63) before the page:
@@ -2730,7 +3785,29 @@ void digiseq_draw(void *bmp, void *ctrl)
         base = info.note;
     root = base % 12;
     /* the title line: the track, its type, the page */
-    if (eng_of(t) == E_ARP) {
+    if (!digiseq_trk[t].on) {
+        draw_off(bmp, t);
+        TEXTF(bmp, FONT5, 1, 57, -1, "%s%d OFF", t < SQ_AUDIO ? "T" : "MIDI ", (t & 7) + 1);
+    } else if (eng_of(t) == E_GRD) {
+        draw_grd(bmp, t);
+        TEXTF(bmp, FONT5, 1, 57, -1, "%s%d GRIDS %s", t < SQ_AUDIO ? "T" : "M", (t & 7) + 1,
+              part_names[digiseq_grd[t].set[G_PART] % GRD_PARTS]);
+    } else if (eng_of(t) == E_TUR) {
+        const struct turing *r = &digiseq_tur[t];
+        uint16_t reg = digiseq_trk[t].on && TRANSPORT == 1 ? ptur[t].reg : r->reg;
+        int nn = clamp_note(tur_note(r, reg, base, root));
+        draw_tur(bmp, t);
+        if (tur_fires(r, reg))              /* the note the register plays now */
+            TEXTF(bmp, FONT5, 1, 57, -1, "%s%d TURING %s%d", t < SQ_AUDIO ? "T" : "M", (t & 7) + 1,
+                  note_names[nn % 12], nn / 12);
+        else
+            TEXTF(bmp, FONT5, 1, 57, -1, "%s%d TURING REST", t < SQ_AUDIO ? "T" : "M", (t & 7) + 1);
+    } else if (eng_of(t) == E_EUC) {
+        const struct euclid *u = &digiseq_euc[t];
+        draw_euc(bmp, t);
+        TEXTF(bmp, FONT5, 1, 57, -1, "%s%d E(%d,%d)", t < SQ_AUDIO ? "T" : "M", (t & 7) + 1,
+              u->set[U_HITS], euc_steps(u));
+    } else if (eng_of(t) == E_ARP) {
         draw_arp(bmp, t);
         if (t < SQ_AUDIO && live[t].n)          /* the keys held */
             TEXTF(bmp, FONT5, 1, 57, -1, "T%d ARP KB%d", t + 1, live[t].n);
@@ -2749,9 +3826,10 @@ void digiseq_draw(void *bmp, void *ctrl)
         title_keep(bmp, 1);                 /* the drop-down, over the title */
     if (msg_ticks && msgbuf[0] && !msg_stock)
         TEXTF(bmp, FONT5, 1, 1, -1, "%s", msgbuf);
-    else if (eng_of(t) == E_ARP && digiseq_pg_arp % ARP_PAGES == PGA_OFFS)
-        TEXTF(bmp, FONT5, 1, 1, -1, "LEN %d   KNOBS %d-%d", digiseq_arp[t].len,
-              (arp_sel[t] & 8) + 1, (arp_sel[t] & 8) + 8);
+    else if (!digiseq_trk[t].on)
+        TEXTF(bmp, FONT5, 1, 1, -1, "TYPE OFF        TRIG BACK");
+    else if (pages_of(eng_of(t)) < 2)
+        TEXTF(bmp, FONT5, 1, 1, -1, "TYPE %s       TRIG BACK", type_names[type_of(t)]);
     else
         TEXTF(bmp, FONT5, 1, 1, -1, "TYPE %s  <> PAGE  TRIG BACK", type_names[type_of(t)]);
 }
